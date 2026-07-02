@@ -205,7 +205,7 @@ export function TeamSettingsPanel({
                         disabled={locked}
                         onClick={() => onDeleteTeam(team.id)}
                       >
-                        Loeschen
+                        Löschen
                       </button>
                     </div>
                     <div className="teamMemberList">
@@ -230,7 +230,7 @@ export function TeamSettingsPanel({
               <div>
                 <div className="section-title">Spieler zuordnen</div>
                 <div className="muted">
-                  {activeTeams.length}/2 Teams mit Spielern benoetigt.
+                  {activeTeams.length}/2 Teams mit Spielern benötigt.
                   {unassigned.length > 0 ? ` ${unassigned.length} unzugeordnet.` : ""}
                 </div>
               </div>
@@ -245,7 +245,7 @@ export function TeamSettingsPanel({
               </div>
             )}
             {players.length === 0 ? (
-              <div className="muted">Erst Spieler auswaehlen.</div>
+              <div className="muted">Erst Spieler auswählen.</div>
             ) : (
               players.map((player) => (
                 <label key={player.id} className="teamAssignRow">
@@ -516,7 +516,7 @@ export function SoundSettingsPanel({
 
       <div className="soundVolumeRow">
         <label className="scoreField soundVolumeField">
-          <span>Lautstaerke</span>
+          <span>Lautstärke</span>
           <input
             type="range"
             min="0"

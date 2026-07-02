@@ -1,10 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import App from "./App.jsx";
 import { GuestView } from "./components/GuestView.jsx";
+import { HostGate } from "./components/HostGate.jsx";
 import { LandingPage } from "./components/LandingPage.jsx";
 import { ObsOverlay } from "./components/ObsOverlay.jsx";
-import { getOrCreateHostKey, normalizeRoomSlug } from "./utils/rooms.js";
+import { normalizeRoomSlug } from "./utils/rooms.js";
 import "./index.css";
 import "./App.css";
 
@@ -42,7 +42,7 @@ const route = routeFromLocation();
 let appElement = <LandingPage />;
 
 if (route.view === "host") {
-  appElement = <App room={route.room} hostKey={getOrCreateHostKey(route.room)} />;
+  appElement = <HostGate room={route.room} />;
 }
 
 if (route.view === "guest") {

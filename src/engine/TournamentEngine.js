@@ -248,10 +248,10 @@ function buildIndividualScoreRound(tournament, baseLogEntry, effectiveMultiplier
 
 function buildPlacementRound(tournament, baseLogEntry, roundScoringSettings, effectiveMultiplier, placements) {
   if (placements.length !== tournament.players.length || placements.some((value) => !value)) {
-    return { ok: false, message: "Alle Plaetze waehlen" };
+    return { ok: false, message: "Alle Plätze wählen" };
   }
   if (new Set(placements).size !== placements.length) {
-    return { ok: false, message: "Spieler doppelt gewaehlt" };
+    return { ok: false, message: "Spieler doppelt gewählt" };
   }
 
   const playerIds = new Set(tournament.players.map((player) => player.id));
@@ -298,7 +298,7 @@ function buildTeamWinnerRound(
 ) {
   const winnerTeam = teams.find((team) => team.id === winnerTeamId);
   if (!winnerTeam || winnerTeam.playerIds.length === 0) {
-    return { ok: false, message: "Gewinnerteam waehlen" };
+    return { ok: false, message: "Gewinnerteam wählen" };
   }
 
   const basePointsByPlace = basePointsByPlaceForPlayers(
@@ -598,7 +598,7 @@ function skipGame(tournament) {
 
 function deleteLogEntry(tournament, entryId) {
   if (!tournament?.log.length) {
-    return { ok: false, message: "Keine Runde zum Loeschen" };
+    return { ok: false, message: "Keine Runde zum Löschen" };
   }
 
   const entryToDelete = tournament.log.find((entry) => entry.id === entryId);
@@ -608,10 +608,10 @@ function deleteLogEntry(tournament, entryId) {
 
   const gameIdToDelete = resolveLogGameId(entryToDelete, tournament.games);
   if (!gameIdToDelete || !isPlainObject(entryToDelete.pointsByPlayer)) {
-    return { ok: false, message: "Loeschen nicht moeglich: Log-Eintrag ist unvollstaendig" };
+    return { ok: false, message: "Löschen nicht möglich: Log-Eintrag ist unvollständig" };
   }
   if (!tournament.games.some((game) => game.id === gameIdToDelete)) {
-    return { ok: false, message: "Loeschen nicht moeglich: Game fehlt im Turnier" };
+    return { ok: false, message: "Löschen nicht möglich: Game fehlt im Turnier" };
   }
 
   const remainingLog = tournament.log.filter((entry) => entry.id !== entryId);
@@ -684,10 +684,10 @@ function buildEditedScoreEntry(tournament, entry, input) {
 function buildEditedPlacementEntry(tournament, entry, input) {
   const placements = Array.isArray(input) ? input : input?.placements ?? [];
   if (placements.length !== tournament.players.length || placements.some((value) => !value)) {
-    return { ok: false, message: "Alle Plaetze waehlen" };
+    return { ok: false, message: "Alle Plätze wählen" };
   }
   if (new Set(placements).size !== placements.length) {
-    return { ok: false, message: "Spieler doppelt gewaehlt" };
+    return { ok: false, message: "Spieler doppelt gewählt" };
   }
 
   const playerIds = new Set(tournament.players.map((player) => player.id));
@@ -735,7 +735,7 @@ function editLogEntry(tournament, entryId, input) {
 
   const entryToEdit = tournament.log.find((entry) => entry.id === entryId);
   if (!entryToEdit || !isPlainObject(entryToEdit.pointsByPlayer)) {
-    return { ok: false, message: "Bearbeiten nicht moeglich: Log-Eintrag ist unvollstaendig" };
+    return { ok: false, message: "Bearbeiten nicht möglich: Log-Eintrag ist unvollständig" };
   }
 
   const roundEvaluationMode = normalizeRoundEvaluationMode(

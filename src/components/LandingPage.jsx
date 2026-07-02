@@ -6,10 +6,12 @@ import {
   isValidRoomSlug,
   normalizeRoomSlug,
   roomPath,
+  storePendingHostPassword,
 } from "../utils/rooms";
 
 export function LandingPage() {
-  const [roomName, setRoomName] = useState("bonk");
+  const [roomName, setRoomName] = useState("");
+  const [hostPassword, setHostPassword] = useState("");
   const [status, setStatus] = useState("");
   const roomSlug = normalizeRoomSlug(roomName);
   const roomValid = isValidRoomSlug(roomSlug);
@@ -28,6 +30,21 @@ export function LandingPage() {
     window.location.href = path;
   }
 
+  function openHost() {
+    if (!links) {
+      setStatus("Gültigen Lobbynamen eingeben");
+      return;
+    }
+
+    if (!hostPassword.trim()) {
+      setStatus("Host-Passwort eingeben");
+      return;
+    }
+
+    storePendingHostPassword(roomSlug, hostPassword);
+    openPath(links.host);
+  }
+
   async function copyObsLink() {
     if (!links) return;
 
@@ -35,7 +52,7 @@ export function LandingPage() {
       await copyTextToClipboard(absoluteRoomUrl("overlay", roomSlug, "bg=transparent"));
       setStatus("OBS-Link kopiert");
     } catch {
-      setStatus("Kopieren nicht moeglich");
+      setStatus("Kopieren nicht möglich");
     }
   }
 
@@ -54,7 +71,19 @@ export function LandingPage() {
             value={roomName}
             maxLength={48}
             onChange={(event) => setRoomName(event.target.value)}
-            placeholder="bonk"
+            placeholder="Lobbyname"
+          />
+        </label>
+
+        <label className="fieldBlock">
+          <span>Host-Passwort</span>
+          <input
+            className="textInput lobbyInput"
+            value={hostPassword}
+            type="password"
+            autoComplete="new-password"
+            onChange={(event) => setHostPassword(event.target.value)}
+            placeholder="Passwort"
           />
         </label>
 
@@ -63,11 +92,11 @@ export function LandingPage() {
         </div>
 
         <div className="landingActions">
-          <button className="btn ok" type="button" disabled={!links} onClick={() => openPath(links.host)}>
-            Als Host oeffnen
+          <button className="btn ok" type="button" disabled={!links || !hostPassword.trim()} onClick={openHost}>
+            Als Host öffnen
           </button>
           <button className="btn secondary" type="button" disabled={!links} onClick={() => openPath(links.guest)}>
-            Als Zuschauer oeffnen
+            Als Zuschauer öffnen
           </button>
           <button className="btn secondary" type="button" disabled={!links} onClick={copyObsLink}>
             OBS-Link kopieren
@@ -76,9 +105,9 @@ export function LandingPage() {
 
         {links && (
           <div className="linkPreview">
-            <span>Host: {links.host}</span>
-            <span>Guest: {links.guest}</span>
-            <span>OBS: {links.overlay}</span>
+            <span>Host-Link: {links.host}</span>
+            <span>Zuschauer-Link: {links.guest}</span>
+            <span>OBS-Link: {links.overlay}</span>
           </div>
         )}
 

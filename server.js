@@ -1,4 +1,6 @@
 import express from "express";
+import { Buffer } from "node:buffer";
+import crypto from "node:crypto";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -41,6 +43,8 @@ function getRoom(room, create = false) {
     rooms.set(normalizedRoom, {
       state: null,
       updatedAt: null,
+      passwordHash: "",
+      passwordSalt: "",
       hostKey: "",
     });
   }
@@ -52,6 +56,63 @@ function hostKeyFromRequest(request) {
   return String(request.get("x-host-key") || request.body?.hostKey || "").trim();
 }
 
+function createHostKey() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+  const hash = crypto
+    .createHash("sha256")
+    .update(`${salt}:${password}`)
+    .digest("hex");
+
+  return { hash, salt };
+}
+
+function passwordMatches(password, record) {
+  if (!record?.passwordHash || !record?.passwordSalt) return false;
+  const { hash } = hashPassword(password, record.passwordSalt);
+  return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(record.passwordHash));
+}
+
+function claimRoomHost(request, response, room) {
+  const normalizedRoom = roomName(room);
+  if (!normalizedRoom) {
+    response.status(400).json({ error: "Invalid room." });
+    return;
+  }
+
+  const password = String(request.body?.password ?? "");
+  if (!password.trim()) {
+    response.status(400).json({ error: "Host password required." });
+    return;
+  }
+
+  const record = getRoom(normalizedRoom, true);
+
+  if (!record.passwordHash) {
+    const { hash, salt } = hashPassword(password);
+    record.passwordHash = hash;
+    record.passwordSalt = salt;
+    record.hostKey = createHostKey();
+    record.updatedAt = record.updatedAt ?? Date.now();
+
+    response.json({ room: normalizedRoom, hostKey: record.hostKey });
+    return;
+  }
+
+  if (!passwordMatches(password, record)) {
+    response.status(403).json({ error: "Wrong host password." });
+    return;
+  }
+
+  if (!record.hostKey) {
+    record.hostKey = createHostKey();
+  }
+
+  response.json({ room: normalizedRoom, hostKey: record.hostKey });
+}
+
 function authorizeRoomWrite(request, response, room, requireHostKey) {
   const normalizedRoom = roomName(room);
   if (!normalizedRoom) {
@@ -59,18 +120,18 @@ function authorizeRoomWrite(request, response, room, requireHostKey) {
     return null;
   }
 
-  const record = getRoom(normalizedRoom, true);
+  const record = getRoom(normalizedRoom, !requireHostKey);
   if (!requireHostKey) return { room: normalizedRoom, record };
+
+  if (!record?.passwordHash || !record.hostKey) {
+    response.status(403).json({ error: "Host access has not been claimed." });
+    return null;
+  }
 
   const hostKey = hostKeyFromRequest(request);
   if (!hostKey) {
     response.status(403).json({ error: "Host key required." });
     return null;
-  }
-
-  if (!record.hostKey) {
-    record.hostKey = hostKey;
-    return { room: normalizedRoom, record };
   }
 
   if (record.hostKey !== hostKey) {
@@ -138,6 +199,7 @@ function readRoomMeta(request, response, room) {
     room: normalizedRoom,
     exists: Boolean(record),
     hasState: Boolean(record?.state),
+    hostProtected: Boolean(record?.passwordHash),
     updatedAt: record?.updatedAt ?? null,
   });
 }
@@ -166,6 +228,10 @@ app.post("/api/rooms/:room/state", (request, response) => {
 
 app.delete("/api/rooms/:room/state", (request, response) => {
   deleteRoomState(request, response, request.params.room);
+});
+
+app.post("/api/rooms/:room/claim-host", (request, response) => {
+  claimRoomHost(request, response, request.params.room);
 });
 
 app.get("/api/rooms/:room/meta", (request, response) => {

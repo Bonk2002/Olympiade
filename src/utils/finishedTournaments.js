@@ -1,5 +1,6 @@
 import { LS_KEYS } from "../constants/defaults";
 import { uid } from "./common";
+import { roomScopedStorageKey } from "./rooms";
 import { normalizeGameScoringMode, normalizeScoringSettings } from "./scoring";
 import { normalizeTeams, teamRankingFromPlayers } from "./teams";
 import { isPlainObject } from "./validation";
@@ -158,9 +159,13 @@ export function normalizeFinishedTournament(value) {
   };
 }
 
-export function loadFinishedTournaments() {
+export function finishedTournamentsStorageKey(room) {
+  return roomScopedStorageKey(LS_KEYS.finishedTournaments, room);
+}
+
+export function loadFinishedTournaments(room) {
   try {
-    const raw = localStorage.getItem(LS_KEYS.finishedTournaments);
+    const raw = localStorage.getItem(finishedTournamentsStorageKey(room));
     if (!raw) return [];
 
     const parsed = JSON.parse(raw);
@@ -175,10 +180,10 @@ export function loadFinishedTournaments() {
   }
 }
 
-export function saveFinishedTournaments(tournaments) {
+export function saveFinishedTournaments(tournaments, room) {
   try {
     localStorage.setItem(
-      LS_KEYS.finishedTournaments,
+      finishedTournamentsStorageKey(room),
       JSON.stringify(tournaments.map(normalizeFinishedTournament).filter(Boolean))
     );
   } catch {

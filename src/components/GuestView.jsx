@@ -2,7 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 
 import { TournamentEngine } from "../engine/TournamentEngine";
 import { formatMultiplier, formatPoints } from "../utils/common";
-import { normalizeActiveTournamentSaveValue } from "../utils/persistence";
+import {
+  activeTournamentStorageKey,
+  normalizeActiveTournamentSaveValue,
+  readActiveTournamentSave,
+} from "../utils/persistence";
 import { normalizeRoomSlug, roomStateApiPath } from "../utils/rooms";
 import {
   gameScoringModeLabel,
@@ -33,37 +37,79 @@ function rankingRows(items) {
   });
 }
 
-async function readGuestSnapshot(room) {
+function emptyGuestSnapshot(raw = "empty", status = "empty") {
+  return {
+    raw,
+    status,
+    source: "",
+    tournament: null,
+    roundEvaluationMode: "",
+    updatedAt: null,
+  };
+}
+
+function snapshotFromSavedData(data, raw, source, updatedAt = null) {
+  return {
+    raw,
+    status: "ready",
+    source,
+    tournament: data.tournament,
+    roundEvaluationMode: data.roundEvaluationMode,
+    updatedAt,
+  };
+}
+
+function readLocalGuestSnapshot(room) {
   const roomSlug = normalizeRoomSlug(room);
-  if (!roomSlug) {
-    return { raw: "missing-room", tournament: null, roundEvaluationMode: "", updatedAt: null };
+  if (!roomSlug) return null;
+
+  let raw = "";
+
+  try {
+    raw = localStorage.getItem(activeTournamentStorageKey(roomSlug)) ?? "";
+  } catch {
+    raw = "";
   }
+
+  const saved = readActiveTournamentSave(roomSlug, {
+    fallbackGlobal: false,
+  });
+
+  if (!saved?.valid) return null;
+  return snapshotFromSavedData(saved.data, `local:${raw}`, "local");
+}
+
+async function readServerGuestSnapshot(room) {
+  const roomSlug = normalizeRoomSlug(room);
+  if (!roomSlug) return null;
 
   try {
     const response = await fetch(roomStateApiPath(roomSlug), { cache: "no-store" });
-    if (!response.ok) {
-      return { raw: `error:${response.status}`, tournament: null, roundEvaluationMode: "", updatedAt: null };
-    }
-
+    if (!response.ok) return null;
     const payload = await response.json();
-    if (!payload?.state) {
-      return { raw: `empty:${payload?.updatedAt ?? ""}`, tournament: null, roundEvaluationMode: "", updatedAt: null };
-    }
+    if (!payload?.state) return null;
 
     const saved = normalizeActiveTournamentSaveValue(payload.state);
-    if (!saved?.valid) {
-      return { raw: "invalid-state", tournament: null, roundEvaluationMode: "", updatedAt: null };
-    }
+    if (!saved?.valid) return null;
 
-    return {
-      raw: JSON.stringify(payload),
-      tournament: saved.data.tournament,
-      roundEvaluationMode: saved.data.roundEvaluationMode,
-      updatedAt: payload.updatedAt ?? null,
-    };
+    return snapshotFromSavedData(
+      saved.data,
+      `server:${JSON.stringify(payload.state)}:${payload.updatedAt ?? ""}`,
+      "server",
+      payload.updatedAt ?? null
+    );
   } catch {
-    return { raw: "offline", tournament: null, roundEvaluationMode: "", updatedAt: null };
+    return null;
   }
+}
+
+async function readGuestSnapshot(room) {
+  const roomSlug = normalizeRoomSlug(room);
+  if (!roomSlug) return emptyGuestSnapshot("missing-room", "missing-room");
+
+  return (await readServerGuestSnapshot(roomSlug))
+    ?? readLocalGuestSnapshot(roomSlug)
+    ?? emptyGuestSnapshot("empty", "empty");
 }
 
 function GuestRanking({ title, rows }) {
@@ -119,7 +165,7 @@ function GuestCurrentGame({ tournament, currentGame, roundEvaluationMode }) {
     return (
       <section className="guestCard guestCurrent waiting">
         <span className="guestEyebrow">Aktuelles Spiel</span>
-        <h1>{openGamesCount === 0 ? "Turnier beendet" : "Naechste Runde wird gedreht..."}</h1>
+        <h1>{openGamesCount === 0 ? "Turnier beendet" : "Nächste Runde wird gedreht..."}</h1>
         <div className="guestChips">
           <span>TR {tournament.globalRound + 1}</span>
           <span>{openGamesCount} Games offen</span>
@@ -180,6 +226,8 @@ export function GuestView({ room }) {
   const roomSlug = normalizeRoomSlug(room);
   const [snapshot, setSnapshot] = useState(() => ({
     raw: "initial",
+    status: "loading",
+    source: "",
     tournament: null,
     roundEvaluationMode: "",
     updatedAt: null,
@@ -251,7 +299,11 @@ export function GuestView({ room }) {
         {!tournament ? (
           <section className="guestEmpty">
             <span className="guestEyebrow">Status</span>
-            <strong>In dieser Lobby laeuft aktuell kein Turnier.</strong>
+            <strong>
+              {snapshot.status === "loading"
+                ? "Turnierstand wird geladen..."
+                : "In dieser Lobby läuft aktuell kein Turnier."}
+            </strong>
           </section>
         ) : (
           <>

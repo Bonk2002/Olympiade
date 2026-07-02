@@ -175,7 +175,7 @@ function RevealStage({ tournament, currentGame, onContinue }) {
 
   return (
     <button className="flowStage revealStage" type="button" onClick={onContinue}>
-      <span className="revealEyebrow">Naechstes Game</span>
+      <span className="revealEyebrow">Nächstes Game</span>
       <strong>{currentGame.name}</strong>
       <span className="revealMeta">
         Runde {currentGame.playedRounds + 1}/{currentGame.totalRounds} · TR {tournament.globalRound + 1}
@@ -244,7 +244,7 @@ function App({ room = "", hostKey = "" } = {}) {
   const [undoArmed, setUndoArmed] = useState(false);
   const [manualPickerOpen, setManualPickerOpen] = useState(false);
   const [presetImportMode, setPresetImportMode] = useState("merge");
-  const [finishedTournaments, setFinishedTournaments] = useState(() => loadFinishedTournaments());
+  const [finishedTournaments, setFinishedTournaments] = useState(() => loadFinishedTournaments(roomSlug));
   const [showWinningScreen, setShowWinningScreen] = useState(false);
   const [viewFinishedTournament, setViewFinishedTournament] = useState(null);
   const [savedFinishedTournamentId, setSavedFinishedTournamentId] = useState(null);
@@ -309,7 +309,7 @@ function App({ room = "", hostKey = "" } = {}) {
         await copyTextToClipboard(roomLinks[type]);
         showToast(type === "host" ? "Host-Link kopiert" : "Link kopiert");
       } catch {
-        showToast("Kopieren nicht moeglich");
+        showToast("Kopieren nicht möglich");
       }
     },
     [roomLinks, showToast]
@@ -393,8 +393,8 @@ function App({ room = "", hostKey = "" } = {}) {
   }, [soundSettings]);
 
   useEffect(() => {
-    saveFinishedTournaments(finishedTournaments);
-  }, [finishedTournaments]);
+    saveFinishedTournaments(finishedTournaments, roomSlug);
+  }, [finishedTournaments, roomSlug]);
 
   useEffect(() => {
     if (tournament) return;
@@ -917,7 +917,7 @@ function App({ room = "", hostKey = "" } = {}) {
     if (tournament) return;
 
     if (selectedPlayers.length < 2) {
-      showToast("Mind. 2 Spieler fuer Teams auswaehlen");
+      showToast("Mind. 2 Spieler für Teams auswählen");
       return;
     }
 
@@ -1373,13 +1373,13 @@ function App({ room = "", hostKey = "" } = {}) {
 
   function deleteLogEntry(entryId) {
     if (!tournament?.log.length) {
-      showToast("Keine Runde zum Loeschen");
+      showToast("Keine Runde zum Löschen");
       return;
     }
 
     if (deleteLogArmedId !== entryId) {
       setDeleteLogArmedId(entryId);
-      showToast("Nochmal klicken zum Loeschen");
+      showToast("Nochmal klicken zum Löschen");
       window.clearTimeout(deleteLogTimerRef.current);
       deleteLogTimerRef.current = window.setTimeout(() => setDeleteLogArmedId(null), 3000);
       return;
@@ -1813,8 +1813,8 @@ function App({ room = "", hostKey = "" } = {}) {
               </div>
               <div className="muted setup-hint">
                 {tournament
-                  ? "Snapshot fuer dieses Turnier."
-                  : "Bereit, wenn Games und Player gewaehlt sind."}
+                  ? "Snapshot für dieses Turnier."
+                  : "Bereit, wenn Games und Player gewählt sind."}
               </div>
             </div>
           </section>

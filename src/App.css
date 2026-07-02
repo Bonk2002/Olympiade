@@ -3287,6 +3287,10 @@ body.obsOverlayBodyDark {
   font-weight: 900;
 }
 
+.landingCard .fieldBlock + .fieldBlock {
+  margin-top: 14px;
+}
+
 .textInput {
   width: 100%;
   min-height: 46px;
@@ -3345,6 +3349,19 @@ body.obsOverlayBodyDark {
   margin-top: 12px;
   color: rgba(218, 255, 241, .90);
   font-weight: 900;
+}
+
+.landingStatus.error {
+  color: rgba(255, 220, 228, .95);
+}
+
+.hostAccessCard h1 {
+  overflow-wrap: anywhere;
+}
+
+.hostAccessForm {
+  display: grid;
+  gap: 16px;
 }
 
 .guestShell {

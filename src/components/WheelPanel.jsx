@@ -482,7 +482,7 @@ export function RoundEntry({
 
       <div className="roundEvaluationPicker">
         <div>
-          <div className="section-title">Wertung fuer diese Runde</div>
+          <div className="section-title">Wertung für diese Runde</div>
           <div className="muted">
             Game-Default: {gameScoringModeLabel(roundInfo.scoringMode)}
           </div>
@@ -539,7 +539,7 @@ export function RoundEntry({
               value={winnerTeamId}
               onChange={(event) => onSetWinnerTeam(event.target.value)}
             >
-              <option value="">Team waehlen</option>
+              <option value="">Team wählen</option>
               {activeTeams.map((team) => (
                 <option key={team.id} value={team.id}>
                   {team.name}

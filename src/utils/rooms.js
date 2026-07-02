@@ -31,11 +31,91 @@ export function hostKeyStorageKey(room) {
   return `tg_host_key_${normalizedRoom}`;
 }
 
+export function pendingHostPasswordStorageKey(room) {
+  const normalizedRoom = normalizeRoomSlug(room) || DEFAULT_ROOM;
+  return `tg_pending_host_password_${normalizedRoom}`;
+}
+
 function normalizeHostKey(value) {
   return String(value ?? "")
     .trim()
     .replace(/[^a-zA-Z0-9_-]/g, "")
     .slice(0, 128);
+}
+
+export function getStoredHostKey(room) {
+  try {
+    return normalizeHostKey(localStorage.getItem(hostKeyStorageKey(room)));
+  } catch {
+    return "";
+  }
+}
+
+export function storeHostKey(room, hostKey) {
+  const normalizedHostKey = normalizeHostKey(hostKey);
+  if (!normalizedHostKey) return "";
+
+  try {
+    localStorage.setItem(hostKeyStorageKey(room), normalizedHostKey);
+  } catch {
+    // ignore restricted storage contexts
+  }
+
+  return normalizedHostKey;
+}
+
+export function consumeHostKeyFromQuery(room) {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const queryHostKey = normalizeHostKey(params.get("hostKey"));
+    if (!queryHostKey) return "";
+
+    storeHostKey(room, queryHostKey);
+    params.delete("hostKey");
+
+    const nextSearch = params.toString();
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", nextUrl);
+    return queryHostKey;
+  } catch {
+    return "";
+  }
+}
+
+export function storePendingHostPassword(room, password) {
+  try {
+    sessionStorage.setItem(pendingHostPasswordStorageKey(room), String(password ?? ""));
+  } catch {
+    // ignore
+  }
+}
+
+export function readPendingHostPassword(room) {
+  try {
+    return sessionStorage.getItem(pendingHostPasswordStorageKey(room)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function clearPendingHostPassword(room) {
+  try {
+    sessionStorage.removeItem(pendingHostPasswordStorageKey(room));
+  } catch {
+    // ignore
+  }
+}
+
+export function consumePendingHostPassword(room) {
+  const storageKey = pendingHostPasswordStorageKey(room);
+
+  try {
+    const password = sessionStorage.getItem(storageKey) ?? "";
+    sessionStorage.removeItem(storageKey);
+    return password;
+  } catch {
+    return "";
+  }
 }
 
 export function createHostKey() {
@@ -74,6 +154,11 @@ export function getOrCreateHostKey(room) {
   } catch {
     return createHostKey();
   }
+}
+
+export function roomClaimHostApiPath(room) {
+  const normalizedRoom = normalizeRoomSlug(room);
+  return normalizedRoom ? `/api/rooms/${normalizedRoom}/claim-host` : "/api/rooms/default/claim-host";
 }
 
 export function roomStateApiPath(room) {

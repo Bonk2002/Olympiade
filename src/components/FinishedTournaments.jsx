@@ -40,7 +40,7 @@ function SettingsSummary({ tournament }) {
         Bonus: {settings.bonusEnabled ? `aktiv · ${settings.bonusChance}% · ×${formatMultiplier(settings.bonusMultiplier)}` : "aus"}
       </span>
       <span>
-        Wheel: {wheelWeightModeLabel(wheelSettings.weightMode)} Â· No Repeat{" "}
+        Wheel: {wheelWeightModeLabel(wheelSettings.weightMode)} · No Repeat{" "}
         {wheelSettings.noRepeat ? "an" : "aus"}
       </span>
     </div>
