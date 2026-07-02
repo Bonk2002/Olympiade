@@ -72,6 +72,11 @@ import {
   saveSoundSettings,
 } from "./utils/sound";
 import {
+  absoluteRoomUrl,
+  copyTextToClipboard,
+  normalizeRoomSlug,
+} from "./utils/rooms";
+import {
   applyPresetImport,
   buildPresetExport,
   parsePresetImportJson,
@@ -202,25 +207,26 @@ function SavedStage({ savedRound }) {
   );
 }
 
-function App() {
+function App({ room = "", hostKey = "" } = {}) {
+  const roomSlug = normalizeRoomSlug(room);
   const [presetsGames, setPresetsGames] = useState(() => loadPresets(LS_KEYS.games));
   const [presetsPlayers, setPresetsPlayers] = useState(() => loadPresets(LS_KEYS.players));
   const [selectedGameIds, setSelectedGameIds] = useState(
-    () => new Set(loadSetupState()?.selectedGameIds ?? [])
+    () => new Set(loadSetupState(roomSlug)?.selectedGameIds ?? [])
   );
   const [selectedPlayerIds, setSelectedPlayerIds] = useState(
-    () => new Set(loadSetupState()?.selectedPlayerIds ?? [])
+    () => new Set(loadSetupState(roomSlug)?.selectedPlayerIds ?? [])
   );
-  const [setupRounds, setSetupRoundsState] = useState(() => loadSetupState()?.setupRounds ?? {});
+  const [setupRounds, setSetupRoundsState] = useState(() => loadSetupState(roomSlug)?.setupRounds ?? {});
   const [scoringSettings, setScoringSettings] = useState(() => loadScoringSettings());
   const [wheelSettings, setWheelSettings] = useState(() => loadWheelSettings());
   const [soundSettings, setSoundSettings] = useState(() => loadSoundSettings());
   const [teamModeEnabled, setTeamModeEnabled] = useState(
-    () => loadSetupState()?.teamModeEnabled ?? false
+    () => loadSetupState(roomSlug)?.teamModeEnabled ?? false
   );
-  const [teams, setTeams] = useState(() => loadSetupState()?.teams ?? []);
+  const [teams, setTeams] = useState(() => loadSetupState(roomSlug)?.teams ?? []);
   const [randomTeamCount, setRandomTeamCount] = useState(
-    () => loadSetupState()?.randomTeamCount ?? 2
+    () => loadSetupState(roomSlug)?.randomTeamCount ?? 2
   );
   const [setupOpen, setSetupOpen] = useState(true);
   const [setupGamesOpen, setSetupGamesOpen] = useState(true);
@@ -245,7 +251,7 @@ function App() {
   const [deleteFinishedArmedId, setDeleteFinishedArmedId] = useState(null);
   const [deleteLogArmedId, setDeleteLogArmedId] = useState(null);
   const [editLogEntry, setEditLogEntry] = useState(null);
-  const [restoreCandidate, setRestoreCandidate] = useState(() => readActiveTournamentSave());
+  const [restoreCandidate, setRestoreCandidate] = useState(() => readActiveTournamentSave(roomSlug));
   const [uiPhase, setUiPhase] = useState("setup");
   const [countdownIndex, setCountdownIndex] = useState(0);
   const [runtimePanel, setRuntimePanel] = useState("games");
@@ -285,6 +291,30 @@ function App() {
     toastTimerRef.current = window.setTimeout(() => setToast(""), 2200);
   }, []);
 
+  const roomLinks = useMemo(() => {
+    if (!roomSlug) return null;
+
+    return {
+      host: `${absoluteRoomUrl("host", roomSlug)}?hostKey=${encodeURIComponent(hostKey)}`,
+      guest: absoluteRoomUrl("guest", roomSlug),
+      overlay: absoluteRoomUrl("overlay", roomSlug, "bg=transparent"),
+    };
+  }, [hostKey, roomSlug]);
+
+  const copyRoomLink = useCallback(
+    async (type) => {
+      if (!roomLinks?.[type]) return;
+
+      try {
+        await copyTextToClipboard(roomLinks[type]);
+        showToast(type === "host" ? "Host-Link kopiert" : "Link kopiert");
+      } catch {
+        showToast("Kopieren nicht moeglich");
+      }
+    },
+    [roomLinks, showToast]
+  );
+
   const {
     unlock: unlockSound,
     playCountdownTick,
@@ -321,8 +351,26 @@ function App() {
   }, []);
 
   useEffect(() => {
-    syncStoredActiveTournamentToServer();
-  }, []);
+    if (!roomSlug) return undefined;
+
+    function onRoomSyncForbidden(event) {
+      if (event.detail?.room && event.detail.room !== roomSlug) return;
+
+      showToast(
+        "Diese Lobby wird bereits von einem anderen Host gesteuert. Nutze deinen Host-Link oder einen anderen Lobbynamen."
+      );
+    }
+
+    window.addEventListener("tg-room-sync-forbidden", onRoomSyncForbidden);
+
+    return () => {
+      window.removeEventListener("tg-room-sync-forbidden", onRoomSyncForbidden);
+    };
+  }, [roomSlug, showToast]);
+
+  useEffect(() => {
+    syncStoredActiveTournamentToServer(roomSlug, hostKey);
+  }, [hostKey, roomSlug]);
 
   useEffect(() => {
     savePresets(LS_KEYS.games, presetsGames);
@@ -351,14 +399,17 @@ function App() {
   useEffect(() => {
     if (tournament) return;
 
-    saveSetupState({
-      selectedGameIds: [...selectedGameIds],
-      selectedPlayerIds: [...selectedPlayerIds],
-      setupRounds,
-      teamModeEnabled,
-      teams: setupTeams,
-      randomTeamCount,
-    });
+    saveSetupState(
+      {
+        selectedGameIds: [...selectedGameIds],
+        selectedPlayerIds: [...selectedPlayerIds],
+        setupRounds,
+        teamModeEnabled,
+        teams: setupTeams,
+        randomTeamCount,
+      },
+      roomSlug
+    );
   }, [
     randomTeamCount,
     selectedGameIds,
@@ -367,30 +418,44 @@ function App() {
     setupTeams,
     teamModeEnabled,
     tournament,
+    roomSlug,
   ]);
 
   useEffect(() => {
     if (!tournament) return;
 
-    saveActiveTournament({
-      version: ACTIVE_TOURNAMENT_VERSION,
-      savedAt: new Date().toISOString(),
-      mode: tournament.mode,
-      tournament,
-      scoringSettings: tournament.scoringSettings,
-      wheelSettings: tournament.wheelSettings,
-      teamModeEnabled: tournament.teamModeEnabled === true,
-      teams: tournament.teams ?? [],
-      selectedGameIds: tournament.games.map((game) => game.id),
-      selectedPlayerIds: tournament.players.map((player) => player.id),
-      setupRounds: deriveSetupRoundsFromTournament(tournament),
-      placements,
-      scoreDraft,
-      roundEvaluationMode,
-      winnerTeamId,
-      teamScoreDraft,
-    });
-  }, [placements, roundEvaluationMode, scoreDraft, teamScoreDraft, tournament, winnerTeamId]);
+    saveActiveTournament(
+      {
+        version: ACTIVE_TOURNAMENT_VERSION,
+        savedAt: new Date().toISOString(),
+        mode: tournament.mode,
+        tournament,
+        scoringSettings: tournament.scoringSettings,
+        wheelSettings: tournament.wheelSettings,
+        teamModeEnabled: tournament.teamModeEnabled === true,
+        teams: tournament.teams ?? [],
+        selectedGameIds: tournament.games.map((game) => game.id),
+        selectedPlayerIds: tournament.players.map((player) => player.id),
+        setupRounds: deriveSetupRoundsFromTournament(tournament),
+        placements,
+        scoreDraft,
+        roundEvaluationMode,
+        winnerTeamId,
+        teamScoreDraft,
+      },
+      roomSlug,
+      hostKey
+    );
+  }, [
+    hostKey,
+    placements,
+    roomSlug,
+    roundEvaluationMode,
+    scoreDraft,
+    teamScoreDraft,
+    tournament,
+    winnerTeamId,
+  ]);
 
   const openGames = useMemo(() => {
     if (tournament) {
@@ -586,7 +651,7 @@ function App() {
   }
 
   function discardSavedTournament() {
-    removeActiveTournamentSave();
+    removeActiveTournamentSave(roomSlug, hostKey);
     setManualPickerOpen(false);
     setSetupOpen(true);
     setUiPhase("setup");
@@ -1375,7 +1440,7 @@ function App() {
     const snapshot = buildFinishedTournamentSnapshot(tournament, uid);
     setFinishedTournaments((current) => [snapshot, ...current]);
     setSavedFinishedTournamentId(snapshot.id);
-    removeActiveTournamentSave();
+    removeActiveTournamentSave(roomSlug, hostKey);
     setRestoreCandidate(null);
     showToast("Turnier gespeichert");
   }
@@ -1384,7 +1449,7 @@ function App() {
     clearUndoConfirmation();
     clearDeleteLogConfirmation();
     wheel.reset();
-    removeActiveTournamentSave();
+    removeActiveTournamentSave(roomSlug, hostKey);
     setRestoreCandidate(null);
     setTournament(null);
     setPlacements([]);
@@ -1433,7 +1498,7 @@ function App() {
     clearUndoConfirmation();
     clearDeleteLogConfirmation();
     wheel.reset();
-    removeActiveTournamentSave();
+    removeActiveTournamentSave(roomSlug, hostKey);
     setRestoreCandidate(null);
     setTournament(null);
     setPlacements([]);
@@ -1494,6 +1559,20 @@ function App() {
             <span>{tournament ? phaseLabel(uiPhase) : "Setup"} · {activeScoringText}</span>
           </div>
           <div className="row">
+            {roomLinks && (
+              <>
+                <span className="pill roomPill">Lobby {roomSlug}</span>
+                <button className="btn secondary" type="button" onClick={() => copyRoomLink("host")}>
+                  Host-Link
+                </button>
+                <button className="btn secondary" type="button" onClick={() => copyRoomLink("guest")}>
+                  Guest
+                </button>
+                <button className="btn secondary" type="button" onClick={() => copyRoomLink("overlay")}>
+                  OBS
+                </button>
+              </>
+            )}
             {tournament && (
               <>
                 <button

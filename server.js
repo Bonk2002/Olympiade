@@ -11,25 +11,165 @@ const port = process.env.PORT || 3000;
 const distPath = path.join(__dirname, "dist");
 const indexPath = path.join(distPath, "index.html");
 
-let tournamentState = null;
+const DEFAULT_ROOM = "default";
+const rooms = new Map();
+
+function normalizeRoomSlug(value) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 32)
+    .replace(/-$/g, "");
+}
+
+function roomName(value) {
+  const room = normalizeRoomSlug(value);
+  return room.length >= 2 ? room : "";
+}
+
+function getRoom(room, create = false) {
+  const normalizedRoom = roomName(room);
+  if (!normalizedRoom) return null;
+
+  if (!rooms.has(normalizedRoom) && create) {
+    rooms.set(normalizedRoom, {
+      state: null,
+      updatedAt: null,
+      hostKey: "",
+    });
+  }
+
+  return rooms.get(normalizedRoom) ?? null;
+}
+
+function hostKeyFromRequest(request) {
+  return String(request.get("x-host-key") || request.body?.hostKey || "").trim();
+}
+
+function authorizeRoomWrite(request, response, room, requireHostKey) {
+  const normalizedRoom = roomName(room);
+  if (!normalizedRoom) {
+    response.status(400).json({ error: "Invalid room." });
+    return null;
+  }
+
+  const record = getRoom(normalizedRoom, true);
+  if (!requireHostKey) return { room: normalizedRoom, record };
+
+  const hostKey = hostKeyFromRequest(request);
+  if (!hostKey) {
+    response.status(403).json({ error: "Host key required." });
+    return null;
+  }
+
+  if (!record.hostKey) {
+    record.hostKey = hostKey;
+    return { room: normalizedRoom, record };
+  }
+
+  if (record.hostKey !== hostKey) {
+    response.status(403).json({ error: "Room is controlled by another host." });
+    return null;
+  }
+
+  return { room: normalizedRoom, record };
+}
+
+function readRoomState(request, response, room) {
+  const normalizedRoom = roomName(room);
+  if (!normalizedRoom) {
+    response.status(400).json({ error: "Invalid room." });
+    return;
+  }
+
+  const record = getRoom(normalizedRoom);
+  response.json({
+    room: normalizedRoom,
+    state: record?.state ?? null,
+    updatedAt: record?.updatedAt ?? null,
+  });
+}
+
+function writeRoomState(request, response, room, requireHostKey = true) {
+  const authorized = authorizeRoomWrite(request, response, room, requireHostKey);
+  if (!authorized) return;
+
+  authorized.record.state = Object.prototype.hasOwnProperty.call(request.body ?? {}, "state")
+    ? request.body.state
+    : null;
+  authorized.record.updatedAt = Date.now();
+
+  response.json({
+    room: authorized.room,
+    state: authorized.record.state,
+    updatedAt: authorized.record.updatedAt,
+  });
+}
+
+function deleteRoomState(request, response, room, requireHostKey = true) {
+  const authorized = authorizeRoomWrite(request, response, room, requireHostKey);
+  if (!authorized) return;
+
+  authorized.record.state = null;
+  authorized.record.updatedAt = Date.now();
+
+  response.json({
+    room: authorized.room,
+    state: null,
+    updatedAt: authorized.record.updatedAt,
+  });
+}
+
+function readRoomMeta(request, response, room) {
+  const normalizedRoom = roomName(room);
+  if (!normalizedRoom) {
+    response.status(400).json({ error: "Invalid room." });
+    return;
+  }
+
+  const record = getRoom(normalizedRoom);
+  response.json({
+    room: normalizedRoom,
+    exists: Boolean(record),
+    hasState: Boolean(record?.state),
+    updatedAt: record?.updatedAt ?? null,
+  });
+}
 
 app.use(express.json({ limit: "2mb" }));
 
 app.get("/api/tournament-state", (request, response) => {
-  response.json({ state: tournamentState });
+  readRoomState(request, response, DEFAULT_ROOM);
 });
 
 app.post("/api/tournament-state", (request, response) => {
-  tournamentState = Object.prototype.hasOwnProperty.call(request.body ?? {}, "state")
-    ? request.body.state
-    : null;
-
-  response.json({ state: tournamentState });
+  writeRoomState(request, response, DEFAULT_ROOM, false);
 });
 
 app.delete("/api/tournament-state", (request, response) => {
-  tournamentState = null;
-  response.json({ state: null });
+  deleteRoomState(request, response, DEFAULT_ROOM, false);
+});
+
+app.get("/api/rooms/:room/state", (request, response) => {
+  readRoomState(request, response, request.params.room);
+});
+
+app.post("/api/rooms/:room/state", (request, response) => {
+  writeRoomState(request, response, request.params.room);
+});
+
+app.delete("/api/rooms/:room/state", (request, response) => {
+  deleteRoomState(request, response, request.params.room);
+});
+
+app.get("/api/rooms/:room/meta", (request, response) => {
+  readRoomMeta(request, response, request.params.room);
 });
 
 app.use(express.static(distPath));

@@ -12,6 +12,11 @@ import {
   normalizeScoringSettings,
 } from "./scoring";
 import {
+  normalizeRoomSlug,
+  roomScopedStorageKey,
+  roomStateApiPath,
+} from "./rooms";
+import {
   defaultRoundEvaluationMode,
   normalizeRoundEvaluationMode,
   normalizeTeams,
@@ -56,6 +61,23 @@ function normalizeTournamentLog(log, teams, players) {
       ),
       teamsSnapshot: normalizeTeams(entry.teamsSnapshot ?? teams, players),
     }));
+}
+
+export function activeTournamentStorageKey(room) {
+  return roomScopedStorageKey(LS_KEYS.activeTournament, room);
+}
+
+export function setupStateStorageKey(room) {
+  return roomScopedStorageKey(LS_KEYS.setupState, room);
+}
+
+function readScopedStorageItem(baseKey, room, fallbackGlobal = true) {
+  const storageKey = roomScopedStorageKey(baseKey, room);
+  const roomSlug = normalizeRoomSlug(room);
+  const roomValue = localStorage.getItem(storageKey);
+
+  if (roomValue || !roomSlug || !fallbackGlobal) return roomValue;
+  return localStorage.getItem(baseKey);
 }
 
 export function loadPresets(key) {
@@ -180,9 +202,9 @@ function normalizeRandomTeamCount(value) {
   return TEAM_COUNT_OPTIONS.includes(count) ? count : 2;
 }
 
-export function loadSetupState() {
+export function loadSetupState(room) {
   try {
-    const raw = localStorage.getItem(LS_KEYS.setupState);
+    const raw = readScopedStorageItem(LS_KEYS.setupState, room);
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -201,10 +223,10 @@ export function loadSetupState() {
   }
 }
 
-export function saveSetupState(value) {
+export function saveSetupState(value, room) {
   try {
     localStorage.setItem(
-      LS_KEYS.setupState,
+      setupStateStorageKey(room),
       JSON.stringify({
         version: SETUP_STATE_VERSION,
         savedAt: new Date().toISOString(),
@@ -299,23 +321,58 @@ export function normalizeSavedTeamScoreDraft(value, tournament) {
   );
 }
 
-function postTournamentStateToServer(state) {
+function notifyRoomSyncForbidden(room) {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(
+    new CustomEvent("tg-room-sync-forbidden", {
+      detail: {
+        room: normalizeRoomSlug(room),
+      },
+    })
+  );
+}
+
+function postTournamentStateToServer(state, room, hostKey) {
   if (typeof fetch !== "function") return;
 
-  fetch("/api/tournament-state", {
+  const roomSlug = normalizeRoomSlug(room);
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (roomSlug && hostKey) {
+    headers["x-host-key"] = hostKey;
+  }
+
+  fetch(roomStateApiPath(roomSlug), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ state }),
+    headers,
+    body: JSON.stringify(roomSlug ? { state, hostKey } : { state }),
+  }).then((response) => {
+    if (response.status === 403) {
+      notifyRoomSyncForbidden(roomSlug);
+    }
   }).catch(() => {});
 }
 
-function deleteTournamentStateFromServer() {
+function deleteTournamentStateFromServer(room, hostKey) {
   if (typeof fetch !== "function") return;
 
-  fetch("/api/tournament-state", {
+  const roomSlug = normalizeRoomSlug(room);
+  const headers = {};
+
+  if (roomSlug && hostKey) {
+    headers["x-host-key"] = hostKey;
+  }
+
+  fetch(roomStateApiPath(roomSlug), {
     method: "DELETE",
+    headers,
+  }).then((response) => {
+    if (response.status === 403) {
+      notifyRoomSyncForbidden(roomSlug);
+    }
   }).catch(() => {});
 }
 
@@ -397,26 +454,30 @@ export function normalizeActiveTournamentSaveValue(parsed) {
   }
 }
 
-export function syncStoredActiveTournamentToServer() {
+export function syncStoredActiveTournamentToServer(room, hostKey) {
   try {
-    const raw = localStorage.getItem(LS_KEYS.activeTournament);
+    const raw = readScopedStorageItem(LS_KEYS.activeTournament, room);
     if (!raw) {
-      deleteTournamentStateFromServer();
+      deleteTournamentStateFromServer(room, hostKey);
       return;
     }
 
     const parsed = JSON.parse(raw);
     if (normalizeActiveTournamentSaveValue(parsed)?.valid) {
-      postTournamentStateToServer(parsed);
+      postTournamentStateToServer(parsed, room, hostKey);
     }
   } catch {
     // ignore server sync failures
   }
 }
 
-export function readActiveTournamentSave() {
+export function readActiveTournamentSave(room, options = {}) {
   try {
-    const raw = localStorage.getItem(LS_KEYS.activeTournament);
+    const raw = readScopedStorageItem(
+      LS_KEYS.activeTournament,
+      room,
+      options.fallbackGlobal !== false
+    );
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -496,22 +557,22 @@ export function readActiveTournamentSave() {
   }
 }
 
-export function saveActiveTournament(value) {
+export function saveActiveTournament(value, room, hostKey) {
   try {
-    localStorage.setItem(LS_KEYS.activeTournament, JSON.stringify(value));
+    localStorage.setItem(activeTournamentStorageKey(room), JSON.stringify(value));
   } catch {
     // ignore
   }
 
-  postTournamentStateToServer(value);
+  postTournamentStateToServer(value, room, hostKey);
 }
 
-export function removeActiveTournamentSave() {
+export function removeActiveTournamentSave(room, hostKey) {
   try {
-    localStorage.removeItem(LS_KEYS.activeTournament);
+    localStorage.removeItem(activeTournamentStorageKey(room));
   } catch {
     // ignore
   }
 
-  deleteTournamentStateFromServer();
+  deleteTournamentStateFromServer(room, hostKey);
 }

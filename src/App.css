@@ -3220,3 +3220,344 @@ body.obsOverlayBodyDark {
     font-size: 16px;
   }
 }
+
+.roomPill {
+  gap: 0;
+  border-color: rgba(53, 255, 177, .34);
+  color: rgba(218, 255, 241, .95);
+}
+
+.landingPage,
+.guestPage {
+  min-height: 100vh;
+  padding: 32px;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 15% 12%, rgba(177, 0, 255, .20), transparent 32%),
+    radial-gradient(circle at 82% 18%, rgba(53, 255, 177, .10), transparent 28%),
+    var(--bg);
+}
+
+.landingPage {
+  display: grid;
+  place-items: center;
+}
+
+.landingCard,
+.guestCard,
+.guestEmpty {
+  border: 1px solid rgba(177, 0, 255, .34);
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .055), rgba(255, 255, 255, .018)),
+    rgba(13, 9, 22, .88);
+  box-shadow: 0 0 34px rgba(177, 0, 255, .16);
+}
+
+.landingCard {
+  width: min(560px, 100%);
+  padding: 26px;
+}
+
+.landingHero {
+  margin-bottom: 22px;
+}
+
+.eyebrow,
+.guestEyebrow {
+  display: block;
+  color: rgba(218, 255, 241, .76);
+  font-size: 12px;
+  font-weight: 950;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.landingHero h1,
+.guestHeader h1 {
+  margin: 5px 0 0;
+  font-size: clamp(34px, 7vw, 58px);
+  line-height: 1;
+}
+
+.fieldBlock {
+  display: grid;
+  gap: 8px;
+  color: rgba(233, 226, 255, .76);
+  font-weight: 900;
+}
+
+.textInput {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(177, 0, 255, .36);
+  border-radius: 12px;
+  outline: 0;
+  background: rgba(0, 0, 0, .30);
+  color: var(--text);
+  font: inherit;
+  font-weight: 850;
+}
+
+.lobbyInput {
+  padding: 0 14px;
+  font-size: 18px;
+}
+
+.slugPreview {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(53, 255, 177, .26);
+  border-radius: 12px;
+  background: rgba(53, 255, 177, .08);
+  color: rgba(218, 255, 241, .92);
+  font-weight: 950;
+}
+
+.slugPreview.invalid {
+  border-color: rgba(255, 95, 122, .35);
+  background: rgba(255, 95, 122, .08);
+  color: rgba(255, 220, 228, .92);
+}
+
+.landingActions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.linkPreview {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid rgba(177, 0, 255, .22);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .22);
+  color: rgba(233, 226, 255, .70);
+  font-size: 13px;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.landingStatus {
+  margin-top: 12px;
+  color: rgba(218, 255, 241, .90);
+  font-weight: 900;
+}
+
+.guestShell {
+  width: min(1180px, 100%);
+  margin: 0 auto;
+  display: grid;
+  gap: 18px;
+}
+
+.guestHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.guestLiveDot {
+  padding: 9px 12px;
+  border: 1px solid rgba(53, 255, 177, .44);
+  border-radius: 999px;
+  background: rgba(53, 255, 177, .10);
+  color: rgba(218, 255, 241, .96);
+  font-weight: 950;
+}
+
+.guestCurrent,
+.guestRanking,
+.guestEmpty {
+  padding: 20px;
+}
+
+.guestCurrent.bonusActive {
+  border-color: rgba(53, 255, 177, .58);
+  box-shadow: 0 0 38px rgba(53, 255, 177, .16);
+}
+
+.guestCurrentTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.guestCurrent h1 {
+  margin: 6px 0 0;
+  font-size: clamp(34px, 6vw, 72px);
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.guestBonus {
+  flex: 0 0 auto;
+  padding: 10px 13px;
+  border-radius: 999px;
+  background: rgba(53, 255, 177, .16);
+  color: rgba(218, 255, 241, .98);
+  box-shadow: 0 0 22px rgba(53, 255, 177, .20);
+}
+
+.guestChips,
+.guestStatus {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.guestChips span,
+.guestStatus span {
+  padding: 8px 10px;
+  border: 1px solid rgba(177, 0, 255, .25);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .24);
+  color: rgba(233, 226, 255, .82);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.guestGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.guestGrid.withTeams {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr);
+}
+
+.guestCardHead,
+.guestRankMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.guestCardHead {
+  margin-bottom: 14px;
+  color: rgba(233, 226, 255, .78);
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.guestRankingRows {
+  display: grid;
+  gap: 10px;
+}
+
+.guestRankRow {
+  padding: 12px;
+  border: 1px solid rgba(177, 0, 255, .22);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, .22);
+}
+
+.guestRankRow.place1 {
+  border-color: rgba(53, 255, 177, .62);
+  background:
+    linear-gradient(180deg, rgba(53, 255, 177, .13), rgba(177, 0, 255, .06)),
+    rgba(0, 0, 0, .22);
+}
+
+.guestRankMeta {
+  min-width: 0;
+}
+
+.guestRankMeta span {
+  color: rgba(233, 226, 255, .64);
+  font-weight: 950;
+}
+
+.guestRankMeta b {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 18px;
+  overflow-wrap: anywhere;
+}
+
+.guestRankMeta strong {
+  color: rgba(246, 241, 255, .98);
+  font-size: 18px;
+}
+
+.guestRankMeta em {
+  width: 22px;
+  height: 22px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255, 184, 77, .45);
+  border-radius: 999px;
+  color: rgba(255, 238, 205, .95);
+  font-style: normal;
+  font-weight: 950;
+}
+
+.guestRankBar {
+  height: 8px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, .32);
+}
+
+.guestRankBar div {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(177, 0, 255, .96), rgba(53, 255, 177, .90));
+}
+
+.guestMuted {
+  color: rgba(233, 226, 255, .62);
+  font-weight: 850;
+}
+
+.guestEmpty {
+  width: min(620px, 100%);
+  margin: 12vh auto 0;
+  text-align: center;
+}
+
+.guestEmpty strong {
+  display: block;
+  margin-top: 8px;
+  font-size: clamp(24px, 5vw, 38px);
+}
+
+@media (max-width: 860px) {
+  .guestGrid.withTeams {
+    grid-template-columns: 1fr;
+  }
+
+  .guestHeader,
+  .guestCurrentTop {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 560px) {
+  .landingPage,
+  .guestPage {
+    padding: 16px;
+  }
+
+  .landingCard,
+  .guestCurrent,
+  .guestRanking,
+  .guestEmpty {
+    padding: 16px;
+  }
+
+  .topbar .roomPill {
+    width: 100%;
+    justify-content: center;
+  }
+}

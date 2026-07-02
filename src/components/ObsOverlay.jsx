@@ -4,9 +4,11 @@ import { LS_KEYS } from "../constants/defaults";
 import { TournamentEngine } from "../engine/TournamentEngine";
 import { formatMultiplier, formatPoints } from "../utils/common";
 import {
+  activeTournamentStorageKey,
   normalizeActiveTournamentSaveValue,
   readActiveTournamentSave,
 } from "../utils/persistence";
+import { normalizeRoomSlug, roomStateApiPath } from "../utils/rooms";
 import {
   gameScoringModeLabel,
   normalizeScoringSettings,
@@ -49,16 +51,26 @@ function snapshotFromSavedData(data, raw, source) {
   };
 }
 
-function readLocalOverlaySnapshot() {
+function readLocalOverlaySnapshot(room, legacyGlobal = false) {
+  const roomSlug = normalizeRoomSlug(room);
+  if (!roomSlug && !legacyGlobal) {
+    return emptyOverlaySnapshot("missing-room", "local");
+  }
+
   let raw = "";
 
   try {
-    raw = localStorage.getItem(LS_KEYS.activeTournament) ?? "";
+    raw = localStorage.getItem(activeTournamentStorageKey(roomSlug)) ?? "";
+    if (!raw && roomSlug) {
+      raw = localStorage.getItem(LS_KEYS.activeTournament) ?? "";
+    }
   } catch {
     raw = "";
   }
 
-  const saved = readActiveTournamentSave();
+  const saved = readActiveTournamentSave(roomSlug, {
+    fallbackGlobal: !roomSlug || legacyGlobal,
+  });
   if (!saved?.valid) {
     return emptyOverlaySnapshot(raw, "local");
   }
@@ -66,11 +78,16 @@ function readLocalOverlaySnapshot() {
   return snapshotFromSavedData(saved.data, `local:${raw}`, "local");
 }
 
-async function readServerOverlaySnapshot() {
+async function readServerOverlaySnapshot(room, legacyGlobal = false) {
   if (typeof fetch !== "function") return null;
 
+  const roomSlug = normalizeRoomSlug(room);
+  if (!roomSlug && !legacyGlobal) return null;
+
   try {
-    const response = await fetch("/api/tournament-state", { cache: "no-store" });
+    const response = await fetch(roomSlug ? roomStateApiPath(roomSlug) : "/api/tournament-state", {
+      cache: "no-store",
+    });
     if (!response.ok) return null;
 
     const payload = await response.json();
@@ -89,8 +106,8 @@ async function readServerOverlaySnapshot() {
   }
 }
 
-async function readOverlaySnapshot() {
-  return (await readServerOverlaySnapshot()) ?? readLocalOverlaySnapshot();
+async function readOverlaySnapshot(room, legacyGlobal = false) {
+  return (await readServerOverlaySnapshot(room, legacyGlobal)) ?? readLocalOverlaySnapshot(room, legacyGlobal);
 }
 
 function rankingRows(items) {
@@ -234,17 +251,29 @@ function EmptyOverlay() {
   );
 }
 
-export function ObsOverlay() {
+function MissingRoomOverlay() {
+  return (
+    <div className="obsEmptyState">
+      <div className="obsEmptyCard">
+        <span className="obsEyebrow">Overlay</span>
+        <strong>Bitte Lobby angeben, z. B. /overlay/bonk</strong>
+      </div>
+    </div>
+  );
+}
+
+export function ObsOverlay({ room = "", legacyGlobal = false } = {}) {
+  const roomSlug = normalizeRoomSlug(room);
   const [backgroundMode] = useState(() => overlayBackgroundMode());
-  const [snapshot, setSnapshot] = useState(() => readLocalOverlaySnapshot());
+  const [snapshot, setSnapshot] = useState(() => readLocalOverlaySnapshot(roomSlug, legacyGlobal));
 
   const refreshSnapshot = useCallback(async () => {
-    const next = await readOverlaySnapshot();
+    const next = await readOverlaySnapshot(roomSlug, legacyGlobal);
 
     setSnapshot((current) => {
       return next.raw === current.raw ? current : next;
     });
-  }, []);
+  }, [legacyGlobal, roomSlug]);
 
   useEffect(() => {
     const bodyClass = backgroundMode === "dark"
@@ -262,7 +291,8 @@ export function ObsOverlay() {
 
   useEffect(() => {
     function onStorage(event) {
-      if (!event.key || event.key === LS_KEYS.activeTournament) {
+      const roomKey = activeTournamentStorageKey(roomSlug);
+      if (!event.key || event.key === roomKey || event.key === LS_KEYS.activeTournament) {
         refreshSnapshot();
       }
     }
@@ -280,7 +310,7 @@ export function ObsOverlay() {
       window.clearTimeout(initialRefreshId);
       window.clearInterval(intervalId);
     };
-  }, [refreshSnapshot]);
+  }, [refreshSnapshot, roomSlug]);
 
   const tournament = snapshot.tournament;
   const playerRankingRows = useMemo(
@@ -302,7 +332,9 @@ export function ObsOverlay() {
 
   return (
     <main className={`obsOverlay obsOverlay-${backgroundMode}`}>
-      {!tournament ? (
+      {!roomSlug && !legacyGlobal ? (
+        <MissingRoomOverlay />
+      ) : !tournament ? (
         <EmptyOverlay />
       ) : (
         <div className="obsOverlayShell">
