@@ -299,6 +299,121 @@ export function normalizeSavedTeamScoreDraft(value, tournament) {
   );
 }
 
+function postTournamentStateToServer(state) {
+  if (typeof fetch !== "function") return;
+
+  fetch("/api/tournament-state", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ state }),
+  }).catch(() => {});
+}
+
+function deleteTournamentStateFromServer() {
+  if (typeof fetch !== "function") return;
+
+  fetch("/api/tournament-state", {
+    method: "DELETE",
+  }).catch(() => {});
+}
+
+export function normalizeActiveTournamentSaveValue(parsed) {
+  try {
+    if (!isPlainObject(parsed)) {
+      return { valid: false, reason: "Saved state is not an object." };
+    }
+    if (parsed.version !== ACTIVE_TOURNAMENT_VERSION) {
+      return { valid: false, reason: "Saved state has a different version." };
+    }
+    if (!isValidTournament(parsed.tournament)) {
+      return { valid: false, reason: "Saved tournament is incomplete." };
+    }
+
+    const savedTournament = parsed.tournament;
+    const legacyMode =
+      parsed.mode === "fixed" || parsed.mode === "multi" ? parsed.mode : savedTournament.mode;
+    const scoringSettings = normalizeScoringSettings(
+      savedTournament.scoringSettings ?? parsed.scoringSettings,
+      savedTournament.players.length,
+      legacyMode
+    );
+    const games = savedTournament.games.map(normalizeTournamentGame);
+    const gameIds = new Set(games.map((game) => game.id));
+    const wheelSettings = normalizeWheelSettings(
+      savedTournament.wheelSettings ?? parsed.wheelSettings
+    );
+    const lastPickedGameId = gameIds.has(savedTournament.lastPickedGameId)
+      ? savedTournament.lastPickedGameId
+      : null;
+    const teams = normalizeTeams(savedTournament.teams ?? parsed.teams, savedTournament.players);
+    const teamModeEnabled = (savedTournament.teamModeEnabled ?? parsed.teamModeEnabled) === true;
+    const tournament = {
+      ...savedTournament,
+      mode: scoringSettings.multiplierEnabled ? "multi" : "fixed",
+      scoringSettings,
+      wheelSettings,
+      teamModeEnabled,
+      teams: teamModeEnabled ? teams : [],
+      log: normalizeTournamentLog(savedTournament.log, teams, savedTournament.players),
+      lastPickedGameId,
+      games,
+      currentBonus: normalizeCurrentBonus(
+        savedTournament.currentBonus,
+        scoringSettings,
+        Boolean(savedTournament.currentPickGameId)
+      ),
+    };
+    const selectedGameIds = isStringArray(parsed.selectedGameIds)
+      ? parsed.selectedGameIds
+      : tournament.games.map((game) => game.id);
+    const selectedPlayerIds = isStringArray(parsed.selectedPlayerIds)
+      ? parsed.selectedPlayerIds
+      : tournament.players.map((player) => player.id);
+    const setupRounds = normalizeSavedSetupRounds(parsed.setupRounds, tournament);
+
+    return {
+      valid: true,
+      data: {
+        version: parsed.version,
+        savedAt: typeof parsed.savedAt === "string" ? parsed.savedAt : "",
+        mode: tournament.mode,
+        tournament,
+        scoringSettings,
+        wheelSettings,
+        selectedGameIds,
+        selectedPlayerIds,
+        setupRounds,
+        placements: normalizeSavedPlacements(parsed.placements, tournament),
+        scoreDraft: normalizeSavedScoreDraft(parsed.scoreDraft, tournament),
+        roundEvaluationMode: normalizeSavedRoundEvaluationMode(parsed.roundEvaluationMode, tournament),
+        winnerTeamId: normalizeSavedWinnerTeamId(parsed.winnerTeamId, tournament),
+        teamScoreDraft: normalizeSavedTeamScoreDraft(parsed.teamScoreDraft, tournament),
+      },
+    };
+  } catch {
+    return { valid: false, reason: "Saved state could not be read." };
+  }
+}
+
+export function syncStoredActiveTournamentToServer() {
+  try {
+    const raw = localStorage.getItem(LS_KEYS.activeTournament);
+    if (!raw) {
+      deleteTournamentStateFromServer();
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (normalizeActiveTournamentSaveValue(parsed)?.valid) {
+      postTournamentStateToServer(parsed);
+    }
+  } catch {
+    // ignore server sync failures
+  }
+}
+
 export function readActiveTournamentSave() {
   try {
     const raw = localStorage.getItem(LS_KEYS.activeTournament);
@@ -387,6 +502,8 @@ export function saveActiveTournament(value) {
   } catch {
     // ignore
   }
+
+  postTournamentStateToServer(value);
 }
 
 export function removeActiveTournamentSave() {
@@ -395,4 +512,6 @@ export function removeActiveTournamentSave() {
   } catch {
     // ignore
   }
+
+  deleteTournamentStateFromServer();
 }

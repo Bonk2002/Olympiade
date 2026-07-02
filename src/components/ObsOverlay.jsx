@@ -3,7 +3,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LS_KEYS } from "../constants/defaults";
 import { TournamentEngine } from "../engine/TournamentEngine";
 import { formatMultiplier, formatPoints } from "../utils/common";
-import { readActiveTournamentSave } from "../utils/persistence";
+import {
+  normalizeActiveTournamentSaveValue,
+  readActiveTournamentSave,
+} from "../utils/persistence";
 import {
   gameScoringModeLabel,
   normalizeScoringSettings,
@@ -26,7 +29,27 @@ function overlayBackgroundMode() {
   }
 }
 
-function readOverlaySnapshot() {
+function emptyOverlaySnapshot(raw = "", source = "local") {
+  return {
+    raw,
+    source,
+    savedAt: "",
+    tournament: null,
+    roundEvaluationMode: "",
+  };
+}
+
+function snapshotFromSavedData(data, raw, source) {
+  return {
+    raw,
+    source,
+    savedAt: data.savedAt,
+    tournament: data.tournament,
+    roundEvaluationMode: data.roundEvaluationMode,
+  };
+}
+
+function readLocalOverlaySnapshot() {
   let raw = "";
 
   try {
@@ -37,20 +60,37 @@ function readOverlaySnapshot() {
 
   const saved = readActiveTournamentSave();
   if (!saved?.valid) {
-    return {
-      raw,
-      savedAt: "",
-      tournament: null,
-      roundEvaluationMode: "",
-    };
+    return emptyOverlaySnapshot(raw, "local");
   }
 
-  return {
-    raw,
-    savedAt: saved.data.savedAt,
-    tournament: saved.data.tournament,
-    roundEvaluationMode: saved.data.roundEvaluationMode,
-  };
+  return snapshotFromSavedData(saved.data, `local:${raw}`, "local");
+}
+
+async function readServerOverlaySnapshot() {
+  if (typeof fetch !== "function") return null;
+
+  try {
+    const response = await fetch("/api/tournament-state", { cache: "no-store" });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    if (!payload || payload.state == null) return null;
+
+    const saved = normalizeActiveTournamentSaveValue(payload.state);
+    if (!saved?.valid) return null;
+
+    return snapshotFromSavedData(
+      saved.data,
+      `server:${JSON.stringify(payload.state)}`,
+      "server"
+    );
+  } catch {
+    return null;
+  }
+}
+
+async function readOverlaySnapshot() {
+  return (await readServerOverlaySnapshot()) ?? readLocalOverlaySnapshot();
 }
 
 function rankingRows(items) {
@@ -196,11 +236,12 @@ function EmptyOverlay() {
 
 export function ObsOverlay() {
   const [backgroundMode] = useState(() => overlayBackgroundMode());
-  const [snapshot, setSnapshot] = useState(() => readOverlaySnapshot());
+  const [snapshot, setSnapshot] = useState(() => readLocalOverlaySnapshot());
 
-  const refreshSnapshot = useCallback(() => {
+  const refreshSnapshot = useCallback(async () => {
+    const next = await readOverlaySnapshot();
+
     setSnapshot((current) => {
-      const next = readOverlaySnapshot();
       return next.raw === current.raw ? current : next;
     });
   }, []);
@@ -227,10 +268,16 @@ export function ObsOverlay() {
     }
 
     window.addEventListener("storage", onStorage);
-    const intervalId = window.setInterval(refreshSnapshot, POLL_INTERVAL_MS);
+    const initialRefreshId = window.setTimeout(() => {
+      refreshSnapshot();
+    }, 0);
+    const intervalId = window.setInterval(() => {
+      refreshSnapshot();
+    }, POLL_INTERVAL_MS);
 
     return () => {
       window.removeEventListener("storage", onStorage);
+      window.clearTimeout(initialRefreshId);
       window.clearInterval(intervalId);
     };
   }, [refreshSnapshot]);

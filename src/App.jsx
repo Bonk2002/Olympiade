@@ -56,6 +56,7 @@ import {
   saveScoringSettings,
   saveSetupState,
   saveWheelSettings,
+  syncStoredActiveTournamentToServer,
 } from "./utils/persistence";
 import {
   basePointsForPlace,
@@ -317,6 +318,10 @@ function App() {
       window.clearTimeout(revealTimerRef.current);
       window.clearTimeout(savedTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    syncStoredActiveTournamentToServer();
   }, []);
 
   useEffect(() => {
