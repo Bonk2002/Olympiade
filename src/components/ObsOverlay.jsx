@@ -123,7 +123,7 @@ function CurrentGamePanel({ tournament, currentGame, roundEvaluationMode }) {
     return (
       <section className="obsCard obsCurrentCard waiting">
         <div className="obsEyebrow">Aktuelles Spiel</div>
-        <h1>{tournamentFinished ? "Turnier beendet" : "Naechste Runde wird gedreht..."}</h1>
+        <h1>{tournamentFinished ? "Turnier beendet" : "Nächste Runde wird gedreht..."}</h1>
         <div className="obsMetaGrid">
           <span>TR {tournament.globalRound + 1}</span>
           <span>{openGamesCount} Games offen</span>
