@@ -8,6 +8,8 @@ import {
 import { clamp } from "./common";
 import {
   normalizeCurrentBonus,
+  normalizeCurrentMinusRound,
+  normalizeCurrentSpecialRound,
   normalizeGameScoringMode,
   normalizeScoringSettings,
 } from "./scoring";
@@ -204,7 +206,7 @@ function normalizeRandomTeamCount(value) {
 
 export function loadSetupState(room) {
   try {
-    const raw = readScopedStorageItem(LS_KEYS.setupState, room);
+    const raw = readScopedStorageItem(LS_KEYS.setupState, room, !normalizeRoomSlug(room));
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
@@ -333,6 +335,14 @@ function notifyRoomSyncForbidden(room) {
   );
 }
 
+export function normalizeSavedRiskSelections(value, tournament) {
+  if (!tournament.currentPickGameId || !isPlainObject(value)) return {};
+
+  return Object.fromEntries(
+    tournament.players.map((player) => [player.id, value[player.id] === true])
+  );
+}
+
 function postTournamentStateToServer(state, room, hostKey) {
   if (typeof fetch !== "function") return;
 
@@ -421,6 +431,16 @@ export function normalizeActiveTournamentSaveValue(parsed) {
         scoringSettings,
         Boolean(savedTournament.currentPickGameId)
       ),
+      currentMinusRound: normalizeCurrentMinusRound(
+        savedTournament.currentMinusRound,
+        scoringSettings,
+        Boolean(savedTournament.currentPickGameId)
+      ),
+      currentSpecialRound: normalizeCurrentSpecialRound(
+        savedTournament.currentSpecialRound,
+        scoringSettings,
+        Boolean(savedTournament.currentPickGameId)
+      ),
     };
     const selectedGameIds = isStringArray(parsed.selectedGameIds)
       ? parsed.selectedGameIds
@@ -447,6 +467,7 @@ export function normalizeActiveTournamentSaveValue(parsed) {
         roundEvaluationMode: normalizeSavedRoundEvaluationMode(parsed.roundEvaluationMode, tournament),
         winnerTeamId: normalizeSavedWinnerTeamId(parsed.winnerTeamId, tournament),
         teamScoreDraft: normalizeSavedTeamScoreDraft(parsed.teamScoreDraft, tournament),
+        riskSelections: normalizeSavedRiskSelections(parsed.riskSelections, tournament),
       },
     };
   } catch {
@@ -456,7 +477,8 @@ export function normalizeActiveTournamentSaveValue(parsed) {
 
 export function syncStoredActiveTournamentToServer(room, hostKey) {
   try {
-    const raw = readScopedStorageItem(LS_KEYS.activeTournament, room);
+    const roomSlug = normalizeRoomSlug(room);
+    const raw = readScopedStorageItem(LS_KEYS.activeTournament, room, !roomSlug);
     if (!raw) {
       deleteTournamentStateFromServer(room, hostKey);
       return;
@@ -473,10 +495,11 @@ export function syncStoredActiveTournamentToServer(room, hostKey) {
 
 export function readActiveTournamentSave(room, options = {}) {
   try {
+    const roomSlug = normalizeRoomSlug(room);
     const raw = readScopedStorageItem(
       LS_KEYS.activeTournament,
       room,
-      options.fallbackGlobal !== false
+      options.fallbackGlobal ?? !roomSlug
     );
     if (!raw) return null;
 
@@ -524,6 +547,16 @@ export function readActiveTournamentSave(room, options = {}) {
         scoringSettings,
         Boolean(savedTournament.currentPickGameId)
       ),
+      currentMinusRound: normalizeCurrentMinusRound(
+        savedTournament.currentMinusRound,
+        scoringSettings,
+        Boolean(savedTournament.currentPickGameId)
+      ),
+      currentSpecialRound: normalizeCurrentSpecialRound(
+        savedTournament.currentSpecialRound,
+        scoringSettings,
+        Boolean(savedTournament.currentPickGameId)
+      ),
     };
     const selectedGameIds = isStringArray(parsed.selectedGameIds)
       ? parsed.selectedGameIds
@@ -550,6 +583,7 @@ export function readActiveTournamentSave(room, options = {}) {
         roundEvaluationMode: normalizeSavedRoundEvaluationMode(parsed.roundEvaluationMode, tournament),
         winnerTeamId: normalizeSavedWinnerTeamId(parsed.winnerTeamId, tournament),
         teamScoreDraft: normalizeSavedTeamScoreDraft(parsed.teamScoreDraft, tournament),
+        riskSelections: normalizeSavedRiskSelections(parsed.riskSelections, tournament),
       },
     };
   } catch {

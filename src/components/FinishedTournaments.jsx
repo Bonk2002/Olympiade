@@ -2,12 +2,15 @@ import { formatMultiplier, formatPoints, formatScore, formatTime } from "../util
 import {
   multiplierModeLabel,
   normalizeScoringSettings,
+  SPECIAL_ROUND_TYPES,
+  specialRoundText,
 } from "../utils/scoring";
 import {
   normalizeRoundEvaluationMode,
   roundEvaluationModeLabel,
 } from "../utils/teams";
 import { normalizeWheelSettings, wheelWeightModeLabel } from "../utils/wheel";
+import { ScoreTimelineChart } from "./ScoreTimelineChart";
 
 function winnerOf(tournament) {
   return tournament?.ranking?.[0] ?? null;
@@ -38,6 +41,9 @@ function SettingsSummary({ tournament }) {
       )}
       <span>
         Bonus: {settings.bonusEnabled ? `aktiv · ${settings.bonusChance}% · ×${formatMultiplier(settings.bonusMultiplier)}` : "aus"}
+      </span>
+      <span>
+        Minusrunden: {settings.minusRoundEnabled ? `aktiv · ${settings.minusRoundChance}% · -${formatPoints(settings.minusRoundPointsStep)}` : "aus"}
       </span>
       <span>
         Wheel: {wheelWeightModeLabel(wheelSettings.weightMode)} · No Repeat{" "}
@@ -109,10 +115,23 @@ function LogTable({ tournament }) {
                 <div className="roundMultiplierLine">
                   {roundEvaluationModeLabel(roundEvaluationMode)}
                 </div>
-                {entry.bonusActive ? (
+                {entry.specialRoundType && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(entry.specialRoundType) ? (
+                  <span className="specialMini">
+                    {specialRoundText({
+                      type: entry.specialRoundType,
+                      hidden: entry.specialRoundHidden === true,
+                      resolvedType: entry.resolvedSpecialRoundType ?? null,
+                      config: entry.specialRoundConfig ?? {},
+                    }, { revealHidden: true })}
+                  </span>
+                ) : entry.bonusActive ? (
                   <span className="bonusMini">
                     BONUS ×{formatMultiplier(bonusMultiplier)} · Gesamt ×
                     {formatMultiplier(effectiveMultiplier)}
+                  </span>
+                ) : entry.minusRoundActive ? (
+                  <span className="minusMini">
+                    MINUSRUNDE · -{formatPoints(entry.minusRoundStep ?? 0)} pro Platz
                   </span>
                 ) : (
                   <div className="roundMultiplierLine">
@@ -157,8 +176,8 @@ export function WinningScreen({
   const bestTeam = tournament.teamModeEnabled ? tournament.teamRanking?.[0] : null;
 
   return (
-    <div className="overlay">
-      <div className="modal winningModal">
+    <div className="overlay winningOverlay">
+      <div className="winningPage">
         <div className="mhead">
           <b>Turnier beendet</b>
           <span className="pill">
@@ -191,6 +210,8 @@ export function WinningScreen({
             <span>Runden: {tournament.totalRounds}</span>
             <span>Games: {tournament.playedGames}</span>
             <span>Bonus-Runden: {tournament.bonusRounds}</span>
+            <span>Minusrunden: {tournament.minusRounds ?? 0}</span>
+            <span>Sonderrunden: {tournament.specialRounds ?? 0}</span>
           </div>
 
           {tournament.teamModeEnabled && (
@@ -204,6 +225,9 @@ export function WinningScreen({
               </span>
             </div>
           )}
+
+          <div className="hr" />
+          <ScoreTimelineChart tournament={tournament} />
 
           <div className="hr" />
           <RankingTable ranking={tournament.ranking.slice(0, 3)} />
@@ -304,6 +328,12 @@ export function FinishedTournamentDetails({ tournament, onClose }) {
             <span>Runden: {tournament.totalRounds}</span>
             <span>Games: {tournament.playedGames}</span>
             <span>Bonus-Runden: {tournament.bonusRounds}</span>
+            <span>Minusrunden: {tournament.minusRounds ?? 0}</span>
+            <span>Sonderrunden: {tournament.specialRounds ?? 0}</span>
+          </div>
+
+          <div className="detailSection">
+            <ScoreTimelineChart tournament={tournament} />
           </div>
 
           <div className="detailSection">

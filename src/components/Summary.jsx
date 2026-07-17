@@ -6,6 +6,8 @@ import {
   multiplierModeLabel,
   normalizeGameScoringMode,
   normalizeScoringSettings,
+  SPECIAL_ROUND_TYPES,
+  specialRoundText,
 } from "../utils/scoring";
 import {
   isTeamRoundEvaluationMode,
@@ -83,6 +85,20 @@ function entryRoundDetails(tournament, entry) {
     normalMultiplier,
     effectiveMultiplier,
     bonusMultiplier,
+    minusRoundActive: entry.minusRoundActive === true,
+    minusRoundStep: Number.isFinite(Number(entry.minusRoundStep))
+      ? Number(entry.minusRoundStep)
+      : roundSettings.minusRoundPointsStep,
+    specialRoundType: entry.specialRoundType ?? (entry.minusRoundActive ? SPECIAL_ROUND_TYPES.minus : entry.bonusActive ? SPECIAL_ROUND_TYPES.bonus : null),
+    specialRound: entry.specialRoundType
+      ? {
+          type: entry.specialRoundType,
+          label: entry.specialRoundLabel,
+          hidden: entry.specialRoundHidden === true,
+          resolvedType: entry.resolvedSpecialRoundType ?? null,
+          config: entry.specialRoundConfig ?? {},
+        }
+      : null,
     scoringMode: normalizeGameScoringMode(entry.scoringMode),
     roundEvaluationMode: normalizeRoundEvaluationMode(
       entry.roundEvaluationMode,
@@ -173,6 +189,10 @@ function LogEntryCard({
     normalMultiplier,
     effectiveMultiplier,
     bonusMultiplier,
+    minusRoundActive,
+    minusRoundStep,
+    specialRoundType,
+    specialRound,
     scoringMode,
     roundEvaluationMode,
   } = entryRoundDetails(tournament, entry);
@@ -184,12 +204,23 @@ function LogEntryCard({
       ? scoreRows(tournament, entry)
       : placementRows(tournament, entry);
   const canDelete = Boolean(entry.id && entry.pointsByPlayer && typeof entry.pointsByPlayer === "object");
-  const canEdit = !isTeamMode && (isScoreMode
+  const isComplexSpecialRound = [
+    SPECIAL_ROUND_TYPES.jackpot,
+    SPECIAL_ROUND_TYPES.robber,
+    SPECIAL_ROUND_TYPES.comeback,
+    SPECIAL_ROUND_TYPES.risk,
+    SPECIAL_ROUND_TYPES.secret,
+    SPECIAL_ROUND_TYPES.mystery,
+    SPECIAL_ROUND_TYPES.allOrNothing,
+    SPECIAL_ROUND_TYPES.kingOfTheRound,
+    SPECIAL_ROUND_TYPES.lastManPunishment,
+  ].includes(specialRoundType);
+  const canEdit = !isComplexSpecialRound && !isTeamMode && (isScoreMode
     ? canDelete
     : canDelete && Array.isArray(entry.placements) && entry.placements.length === tournament.players.length);
 
   return (
-    <article className={`logCard ${scoringMode} ${isTeamMode ? "teamRound" : ""} ${entry.bonusActive ? "bonusActive" : ""}`}>
+    <article className={`logCard ${scoringMode} ${isTeamMode ? "teamRound" : ""} ${entry.bonusActive ? "bonusActive" : ""} ${minusRoundActive ? "minusActive" : ""} ${isComplexSpecialRound ? `specialActive special-${specialRoundType}` : ""}`}>
       <div className="logCardTop">
         <div className="logTitleBlock">
           <div className="logRound">TR {entry.globalRound ?? "?"}</div>
@@ -203,7 +234,7 @@ function LogEntryCard({
             className="btn secondary miniBtn"
             type="button"
             disabled={!canEdit}
-            title={canEdit ? "Runde bearbeiten" : isTeamMode ? "Team-Runden koennen aktuell nur geloescht werden" : "Dieser alte Eintrag hat nicht genug Daten"}
+            title={canEdit ? "Runde bearbeiten" : isComplexSpecialRound ? "Sonderrunden können aktuell nur gelöscht werden" : isTeamMode ? "Team-Runden koennen aktuell nur geloescht werden" : "Dieser alte Eintrag hat nicht genug Daten"}
             onClick={() => onEdit(entry)}
           >
             Bearbeiten
@@ -222,17 +253,36 @@ function LogEntryCard({
       <div className="logMetaChips">
         <span>{roundEvaluationModeLabel(roundEvaluationMode)}</span>
         <span>Spiel-Runde {entry.gameRound ?? "?"}</span>
-        <span>
-          {roundSettings.multiplierEnabled ? multiplierModeLabel(multiplierMode) : "Multiplikator aus"}
-        </span>
-        <span>Normal ×{formatMultiplier(normalMultiplier)}</span>
-        {entry.bonusActive ? (
-          <span className="bonusChip">
-            Bonus ×{formatMultiplier(bonusMultiplier)} · Gesamt ×
-            {formatMultiplier(effectiveMultiplier)}
+        {minusRoundActive ? (
+          <span className="minusChip">
+            MINUSRUNDE · -{formatMultiplier(minusRoundStep)} pro Platz
           </span>
+        ) : isComplexSpecialRound ? (
+          <>
+            <span className={`specialChip specialChip-${specialRoundType}`}>
+              {specialRoundText(specialRound, { revealHidden: true })}
+            </span>
+            <span>
+              {roundSettings.multiplierEnabled ? multiplierModeLabel(multiplierMode) : "Multiplikator aus"}
+            </span>
+            <span>Normal ×{formatMultiplier(normalMultiplier)}</span>
+            <span>Gesamt ×{formatMultiplier(effectiveMultiplier)}</span>
+          </>
         ) : (
-          <span>Gesamt ×{formatMultiplier(effectiveMultiplier)}</span>
+          <>
+            <span>
+              {roundSettings.multiplierEnabled ? multiplierModeLabel(multiplierMode) : "Multiplikator aus"}
+            </span>
+            <span>Normal ×{formatMultiplier(normalMultiplier)}</span>
+            {entry.bonusActive ? (
+              <span className="bonusChip">
+                Bonus ×{formatMultiplier(bonusMultiplier)} · Gesamt ×
+                {formatMultiplier(effectiveMultiplier)}
+              </span>
+            ) : (
+              <span>Gesamt ×{formatMultiplier(effectiveMultiplier)}</span>
+            )}
+          </>
         )}
       </div>
 
@@ -247,6 +297,10 @@ function LogEntryCard({
           </div>
         ))}
       </div>
+
+      {entry.specialRoundResult && (
+        <div className="specialResultLine">{entry.specialRoundResult}</div>
+      )}
 
       {roundEvaluationMode === "teamPlacement" && Array.isArray(entry.placements) && (
         <div className="logTeamBreakdown">
@@ -355,18 +409,32 @@ function LogEditModalForm({ tournament, entry, onClose, onSave }) {
               <div className="muted">TR {entry.globalRound} · {gameScoringModeLabel(scoringMode)}</div>
               <div className="section-title">{entry.gameName}</div>
             </div>
-            <span className="pill">
-              <span className="dot" /> Gesamt ×{formatMultiplier(details.effectiveMultiplier)}
-            </span>
+            {details.minusRoundActive ? (
+              <span className="pill minusPill">
+                <span className="dot" /> MINUSRUNDE · -{formatMultiplier(details.minusRoundStep)} pro Platz
+              </span>
+            ) : (
+              <span className="pill">
+                <span className="dot" /> Gesamt ×{formatMultiplier(details.effectiveMultiplier)}
+              </span>
+            )}
           </div>
 
           <div className="logMetaChips">
             <span>Spiel-Runde {entry.gameRound ?? "?"}</span>
-            <span>Normal ×{formatMultiplier(details.normalMultiplier)}</span>
-            {entry.bonusActive && (
-              <span className="bonusChip">
-                Bonus ×{formatMultiplier(details.bonusMultiplier)}
+            {details.minusRoundActive ? (
+              <span className="minusChip">
+                Platz 1 = 0 · danach -{formatMultiplier(details.minusRoundStep)}
               </span>
+            ) : (
+              <>
+                <span>Normal ×{formatMultiplier(details.normalMultiplier)}</span>
+                {entry.bonusActive && (
+                  <span className="bonusChip">
+                    Bonus ×{formatMultiplier(details.bonusMultiplier)}
+                  </span>
+                )}
+              </>
             )}
           </div>
 

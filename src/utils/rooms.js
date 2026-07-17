@@ -1,20 +1,15 @@
-export const DEFAULT_ROOM = "default";
-export const ROOM_MIN_LENGTH = 2;
-export const ROOM_MAX_LENGTH = 32;
+import {
+  ROOM_MAX_LENGTH,
+  ROOM_MIN_LENGTH,
+  normalizeRoomSlug as normalizeSharedRoomSlug,
+} from "../../roomSlug";
 
 export function normalizeRoomSlug(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9-]/g, "")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, ROOM_MAX_LENGTH)
-    .replace(/-$/g, "");
+  return normalizeSharedRoomSlug(value);
 }
+
+export const DEFAULT_ROOM = "default";
+export { ROOM_MAX_LENGTH, ROOM_MIN_LENGTH };
 
 export function isValidRoomSlug(value) {
   const room = normalizeRoomSlug(value);

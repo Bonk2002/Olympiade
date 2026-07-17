@@ -3,11 +3,21 @@ import { useLayoutEffect, useRef } from "react";
 import {
   MAX_BONUS_CHANCE,
   MAX_BONUS_MULTIPLIER,
+  MAX_MINUS_ROUND_CHANCE,
+  MAX_MINUS_ROUND_POINTS_STEP,
   MAX_MULTIPLIER,
   MAX_POINTS_VALUE,
+  MAX_RISK_SUCCESS_PLACES,
+  MAX_SPECIAL_ROUND_CHANCE,
+  MAX_SPECIAL_ROUND_POINTS,
   MIN_BONUS_CHANCE,
   MIN_BONUS_MULTIPLIER,
+  MIN_MINUS_ROUND_CHANCE,
+  MIN_MINUS_ROUND_POINTS_STEP,
   MIN_MULTIPLIER,
+  MIN_RISK_SUCCESS_PLACES,
+  MIN_SPECIAL_ROUND_CHANCE,
+  MIN_SPECIAL_ROUND_POINTS,
 } from "../constants/defaults";
 import { formatNumberInput } from "../utils/common";
 import {
@@ -285,6 +295,11 @@ export function ScoringSettingsPanel({
   onBonusEnabledChange,
   onBonusMultiplierChange,
   onBonusChanceChange,
+  onMinusRoundEnabledChange,
+  onMinusRoundChanceChange,
+  onMinusRoundPointsStepChange,
+  onScoringBooleanChange,
+  onScoringNumberChange,
   onReset,
 }) {
   const normalized = normalizeScoringSettings(settings, placeCount);
@@ -414,6 +429,451 @@ export function ScoringSettingsPanel({
               onChange={(event) => onBonusChanceChange(event.target.value)}
             />
           </label>
+        </div>
+      </div>
+
+      <div className={`minusRoundSetting ${normalized.minusRoundEnabled ? "active" : ""}`}>
+        <label className="bonusToggle">
+          <input
+            type="checkbox"
+            checked={normalized.minusRoundEnabled}
+            disabled={locked}
+            onChange={(event) => onMinusRoundEnabledChange(event.target.checked)}
+          />
+          <span>Minusrunden aktivieren</span>
+        </label>
+
+        <div className="bonusFields">
+          <label className="scoreField">
+            <span>Chance %</span>
+            <input
+              type="number"
+              min={MIN_MINUS_ROUND_CHANCE}
+              max={MAX_MINUS_ROUND_CHANCE}
+              step="1"
+              value={formatNumberInput(normalized.minusRoundChance)}
+              disabled={locked}
+              onChange={(event) => onMinusRoundChanceChange(event.target.value)}
+            />
+          </label>
+          <label className="scoreField">
+            <span>Minus pro Platz</span>
+            <input
+              type="number"
+              min={MIN_MINUS_ROUND_POINTS_STEP}
+              max={MAX_MINUS_ROUND_POINTS_STEP}
+              step="1"
+              value={formatNumberInput(normalized.minusRoundPointsStep)}
+              disabled={locked}
+              onChange={(event) => onMinusRoundPointsStepChange(event.target.value)}
+            />
+          </label>
+        </div>
+        <div className="muted scoringHint">Minusrunde blockiert Bonus für diese Runde.</div>
+      </div>
+
+      <div className="specialRoundsPanel">
+        <div className="specialRoundsHead">
+          <div>
+            <div className="section-title">Sonderrunden</div>
+            <div className="muted">Maximal eine pro gezogener Runde</div>
+          </div>
+        </div>
+
+        <div className="specialRoundRows">
+          <div className={`specialRoundRow ${normalized.jackpotRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.jackpotRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("jackpotRoundEnabled", event.target.checked)}
+              />
+              <span>Jackpot</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.jackpotRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("jackpotRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Bonus</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.jackpotRoundBonusPoints)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("jackpotRoundBonusPoints", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.robberRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.robberRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("robberRoundEnabled", event.target.checked)}
+              />
+              <span>Räuber</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.robberRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("robberRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Klaubetrag</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.robberRoundStealAmount)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("robberRoundStealAmount", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.comebackRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.comebackRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("comebackRoundEnabled", event.target.checked)}
+              />
+              <span>Comeback</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.comebackRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("comebackRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Letzter</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.comebackRoundLastBonus)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("comebackRoundLastBonus", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Vorletzter</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.comebackRoundSecondLastBonus)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("comebackRoundSecondLastBonus", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.riskRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.riskRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("riskRoundEnabled", event.target.checked)}
+              />
+              <span>Risiko</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.riskRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("riskRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Bonus</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.riskRoundRewardPoints)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("riskRoundRewardPoints", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Strafe</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.riskRoundPenaltyPoints)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("riskRoundPenaltyPoints", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Top</span>
+              <input
+                type="number"
+                min={MIN_RISK_SUCCESS_PLACES}
+                max={MAX_RISK_SUCCESS_PLACES}
+                step="1"
+                value={formatNumberInput(normalized.riskRoundSuccessPlaces)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("riskRoundSuccessPlaces", event.target.value, MIN_RISK_SUCCESS_PLACES, MAX_RISK_SUCCESS_PLACES)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.secretRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.secretRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("secretRoundEnabled", event.target.checked)}
+              />
+              <span>Geheimrunde</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.secretRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("secretRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <span className="specialRoundHint">verdeckt bis Log</span>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.mysteryRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.mysteryRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("mysteryRoundEnabled", event.target.checked)}
+              />
+              <span>Mystery-Bonus</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.mysteryRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("mysteryRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Min</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.mysteryRoundMinBonus)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("mysteryRoundMinBonus", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Max</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.mysteryRoundMaxBonus)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("mysteryRoundMaxBonus", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Schritt</span>
+              <input
+                type="number"
+                min="1"
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.mysteryRoundStep)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("mysteryRoundStep", event.target.value, 1, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.allOrNothingRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.allOrNothingRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("allOrNothingRoundEnabled", event.target.checked)}
+              />
+              <span>Alles oder Nichts</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.allOrNothingRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("allOrNothingRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Sieger</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.allOrNothingRoundWinnerPoints)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("allOrNothingRoundWinnerPoints", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+            <label className="bonusToggle compactToggle">
+              <input
+                type="checkbox"
+                checked={normalized.allOrNothingRoundLastPenaltyEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("allOrNothingRoundLastPenaltyEnabled", event.target.checked)}
+              />
+              <span>Letzter bestrafen</span>
+            </label>
+            <label className="scoreField">
+              <span>Strafe</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.allOrNothingRoundLastPenalty)}
+                disabled={locked || !normalized.allOrNothingRoundLastPenaltyEnabled}
+                onChange={(event) => onScoringNumberChange?.("allOrNothingRoundLastPenalty", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.kingOfTheRoundEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.kingOfTheRoundEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("kingOfTheRoundEnabled", event.target.checked)}
+              />
+              <span>Rundenkönig</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.kingOfTheRoundChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("kingOfTheRoundChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Sieger</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.kingOfTheRoundWinnerPoints)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("kingOfTheRoundWinnerPoints", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
+
+          <div className={`specialRoundRow ${normalized.lastManPunishmentEnabled ? "active" : ""}`}>
+            <label className="bonusToggle">
+              <input
+                type="checkbox"
+                checked={normalized.lastManPunishmentEnabled}
+                disabled={locked}
+                onChange={(event) => onScoringBooleanChange?.("lastManPunishmentEnabled", event.target.checked)}
+              />
+              <span>Letzter - Strafe</span>
+            </label>
+            <label className="scoreField">
+              <span>Chance %</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_CHANCE}
+                max={MAX_SPECIAL_ROUND_CHANCE}
+                step="1"
+                value={formatNumberInput(normalized.lastManPunishmentChance)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("lastManPunishmentChance", event.target.value, MIN_SPECIAL_ROUND_CHANCE, MAX_SPECIAL_ROUND_CHANCE)}
+              />
+            </label>
+            <label className="scoreField">
+              <span>Strafe</span>
+              <input
+                type="number"
+                min={MIN_SPECIAL_ROUND_POINTS}
+                max={MAX_SPECIAL_ROUND_POINTS}
+                step="1"
+                value={formatNumberInput(normalized.lastManPunishmentPenaltyPoints)}
+                disabled={locked}
+                onChange={(event) => onScoringNumberChange?.("lastManPunishmentPenaltyPoints", event.target.value, MIN_SPECIAL_ROUND_POINTS, MAX_SPECIAL_ROUND_POINTS)}
+              />
+            </label>
+          </div>
         </div>
       </div>
 

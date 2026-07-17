@@ -95,11 +95,15 @@ export function HostGate({ room }) {
         });
 
         if (response.status === 403) {
+          const responseText = await response.text().catch(() => "");
+          console.warn("claim failed:", response.status, responseText);
           setMessage("Falsches Host-Passwort für diese Lobby.");
           return;
         }
 
         if (!response.ok) {
+          const responseText = await response.text().catch(() => "");
+          console.warn("claim failed:", response.status, responseText);
           setMessage("Lobby konnte nicht geöffnet werden.");
           return;
         }

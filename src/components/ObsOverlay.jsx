@@ -13,6 +13,8 @@ import {
   gameScoringModeLabel,
   normalizeScoringSettings,
   roundMultiplier,
+  SPECIAL_ROUND_TYPES,
+  specialRoundText,
 } from "../utils/scoring";
 import {
   normalizeRoundEvaluationMode,
@@ -170,9 +172,18 @@ function CurrentGamePanel({ tournament, currentGame, roundEvaluationMode }) {
     tournament.players.length,
     tournament.mode
   );
-  const currentBonus = tournament.currentBonus?.active ? tournament.currentBonus : null;
+  const currentSpecialRound = tournament.currentSpecialRound ?? null;
+  const currentMinusRound = currentSpecialRound?.type === SPECIAL_ROUND_TYPES.minus
+    ? { active: true, pointsStep: currentSpecialRound.config?.pointsStep ?? 0 }
+    : tournament.currentMinusRound?.active ? tournament.currentMinusRound : null;
+  const currentBonus = currentSpecialRound?.type === SPECIAL_ROUND_TYPES.bonus
+    ? { active: true, multiplier: currentSpecialRound.config?.multiplier ?? 1 }
+    : !currentMinusRound && tournament.currentBonus?.active ? tournament.currentBonus : null;
+  const otherSpecialRound = currentSpecialRound && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(currentSpecialRound.type)
+    ? currentSpecialRound
+    : null;
   const normalMultiplier = currentGame ? roundMultiplier(tournament, currentGame) : 1;
-  const effectiveMultiplier = normalMultiplier * (currentBonus?.multiplier ?? 1);
+  const effectiveMultiplier = currentMinusRound ? 1 : normalMultiplier * (currentBonus?.multiplier ?? 1);
   const openGamesCount = TournamentEngine.openGames(tournament).length;
   const tournamentFinished = openGamesCount === 0;
 
@@ -197,7 +208,7 @@ function CurrentGamePanel({ tournament, currentGame, roundEvaluationMode }) {
   );
 
   return (
-    <section className={`obsCard obsCurrentCard ${currentBonus ? "bonusActive" : ""}`}>
+    <section className={`obsCard obsCurrentCard ${currentBonus ? "bonusActive" : ""} ${currentMinusRound ? "minusActive" : ""} ${otherSpecialRound ? `specialActive special-${otherSpecialRound.type}` : ""}`}>
       <div className="obsCurrentTop">
         <div>
           <div className="obsEyebrow">Aktuelles Spiel</div>
@@ -208,6 +219,16 @@ function CurrentGamePanel({ tournament, currentGame, roundEvaluationMode }) {
             BONUS ×{formatMultiplier(currentBonus.multiplier)}
           </span>
         )}
+        {currentMinusRound && (
+          <span className="obsMinusBadge">
+            MINUSRUNDE · -{formatMultiplier(currentMinusRound.pointsStep)}
+          </span>
+        )}
+        {otherSpecialRound && (
+          <span className={`obsSpecialBadge obsSpecialBadge-${otherSpecialRound.type}`}>
+            {specialRoundText(otherSpecialRound)}
+          </span>
+        )}
       </div>
 
       <div className="obsMetaGrid">
@@ -215,8 +236,16 @@ function CurrentGamePanel({ tournament, currentGame, roundEvaluationMode }) {
         <span>TR {tournament.globalRound + 1}</span>
         <span>{roundEvaluationModeLabel(normalizedRoundMode)}</span>
         <span>{gameScoringModeLabel(currentGame.scoringMode)}</span>
-        <span>Normal ×{formatMultiplier(normalMultiplier)}</span>
-        <span>Gesamt ×{formatMultiplier(effectiveMultiplier)}</span>
+        {currentMinusRound ? (
+          <span>-{formatMultiplier(currentMinusRound.pointsStep)} pro Platz</span>
+        ) : otherSpecialRound ? (
+          <span>{specialRoundText(otherSpecialRound)}</span>
+        ) : (
+          <>
+            <span>Normal ×{formatMultiplier(normalMultiplier)}</span>
+            <span>Gesamt ×{formatMultiplier(effectiveMultiplier)}</span>
+          </>
+        )}
       </div>
     </section>
   );
@@ -227,6 +256,10 @@ function StatusLine({ tournament }) {
   const remainingRounds = tournament.games.reduce((sum, game) => sum + (game.remainingRounds ?? 0), 0);
   const openGames = TournamentEngine.openGames(tournament).length;
   const bonusRounds = tournament.log.filter((entry) => entry.bonusActive).length;
+  const minusRounds = tournament.log.filter((entry) => entry.minusRoundActive).length;
+  const specialRounds = tournament.log.filter((entry) =>
+    entry.specialRoundType && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(entry.specialRoundType)
+  ).length;
   const status = remainingRounds === 0 && !tournament.currentPickGameId ? "Fertig" : "Live";
 
   return (
@@ -236,6 +269,8 @@ function StatusLine({ tournament }) {
       <span>{remainingRounds} offen</span>
       <span>{openGames} Games</span>
       {bonusRounds > 0 && <span>{bonusRounds} Bonus</span>}
+      {minusRounds > 0 && <span>{minusRounds} Minus</span>}
+      {specialRounds > 0 && <span>{specialRounds} Sonderrunden</span>}
     </div>
   );
 }

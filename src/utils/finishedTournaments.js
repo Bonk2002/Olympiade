@@ -84,6 +84,8 @@ export function buildFinishedTournamentSummary(tournament) {
   const wheelSettings = normalizeWheelSettings(tournament?.wheelSettings);
   const playedGames = games.filter((game) => game.playedRounds > 0).length;
   const bonusRounds = log.filter((entry) => entry.bonusActive === true).length;
+  const minusRounds = log.filter((entry) => entry.minusRoundActive === true).length;
+  const specialRounds = log.filter((entry) => entry.specialRoundType).length;
 
   return {
     mode: scoringSettings.multiplierEnabled ? "multi" : "fixed",
@@ -99,6 +101,8 @@ export function buildFinishedTournamentSummary(tournament) {
     totalRounds: log.length,
     playedGames,
     bonusRounds,
+    minusRounds,
+    specialRounds,
   };
 }
 
@@ -156,6 +160,8 @@ export function normalizeFinishedTournament(value) {
     totalRounds: safeNumber(value.totalRounds, log.length),
     playedGames: safeNumber(value.playedGames, games.filter((game) => game.playedRounds > 0).length),
     bonusRounds: safeNumber(value.bonusRounds, log.filter((entry) => entry.bonusActive === true).length),
+    minusRounds: safeNumber(value.minusRounds, log.filter((entry) => entry.minusRoundActive === true).length),
+    specialRounds: safeNumber(value.specialRounds, log.filter((entry) => entry.specialRoundType).length),
   };
 }
 

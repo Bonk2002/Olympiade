@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { RestoreTournamentModal, Toast } from "./components/Overlays";
+import { OlympiadeTransition } from "./components/OlympiadeTransition";
 import {
   FinishedTournamentDetails,
   FinishedTournamentsList,
@@ -32,17 +33,21 @@ import {
   LS_KEYS,
   MAX_BONUS_CHANCE,
   MAX_BONUS_MULTIPLIER,
+  MAX_MINUS_ROUND_CHANCE,
+  MAX_MINUS_ROUND_POINTS_STEP,
   MAX_MULTIPLIER,
   MAX_POINTS_VALUE,
   MIN_BONUS_CHANCE,
   MIN_BONUS_MULTIPLIER,
+  MIN_MINUS_ROUND_CHANCE,
+  MIN_MINUS_ROUND_POINTS_STEP,
   MIN_MULTIPLIER,
   MIN_SCORING_PLACES,
 } from "./constants/defaults";
 import { TournamentEngine } from "./engine/TournamentEngine";
 import { useSoundEffects } from "./hooks/useSoundEffects";
 import { useWheelSpin } from "./hooks/useWheelSpin";
-import { clamp, formatMultiplier, formatPoints, uid } from "./utils/common";
+import { clamp, formatPoints, uid } from "./utils/common";
 import {
   deriveSetupRoundsFromTournament,
   loadSetupState,
@@ -60,11 +65,12 @@ import {
 } from "./utils/persistence";
 import {
   basePointsForPlace,
-  gameScoringModeLabel,
   modeText,
   normalizeGameScoringMode,
   normalizeNumber,
   normalizeScoringSettings,
+  roundMultiplier,
+  specialRoundText,
 } from "./utils/scoring";
 import {
   loadSoundSettings,
@@ -96,6 +102,7 @@ import {
   defaultRoundEvaluationMode,
   normalizeRoundEvaluationMode,
   normalizeTeams,
+  roundEvaluationModeLabel,
   teamsWithPlayers,
 } from "./utils/teams";
 
@@ -103,10 +110,12 @@ const COUNTDOWN_STEPS = ["3", "2", "1", "LOS"];
 
 function phaseLabel(phase) {
   if (phase === "countdown") return "Countdown";
+  if (phase === "startTransition") return "Turnierstart";
   if (phase === "wheel") return "Wheel";
   if (phase === "reveal") return "Reveal";
   if (phase === "roundEntry") return "Live-Runde";
   if (phase === "saved") return "Gespeichert";
+  if (phase === "winnerTransition") return "Finale";
   return "Setup";
 }
 
@@ -158,38 +167,6 @@ function CountdownStage({ value }) {
   );
 }
 
-function RevealStage({ tournament, currentGame, onContinue }) {
-  if (!tournament || !currentGame) return null;
-
-  const scoringSettings = normalizeScoringSettings(tournament.scoringSettings, tournament.players.length);
-  const currentBonus = tournament.currentBonus?.active ? tournament.currentBonus : null;
-  const normalMultiplier = scoringSettings.multiplierEnabled
-    ? Math.pow(
-        scoringSettings.multiplier,
-        scoringSettings.multiplierMode === "perGame"
-          ? currentGame.playedRounds
-          : tournament.globalRound
-      )
-    : 1;
-  const effectiveMultiplier = normalMultiplier * (currentBonus?.multiplier ?? 1);
-
-  return (
-    <button className="flowStage revealStage" type="button" onClick={onContinue}>
-      <span className="revealEyebrow">Nächstes Game</span>
-      <strong>{currentGame.name}</strong>
-      <span className="revealMeta">
-        Runde {currentGame.playedRounds + 1}/{currentGame.totalRounds} · TR {tournament.globalRound + 1}
-      </span>
-      <span className="revealChips">
-        <span>{gameScoringModeLabel(currentGame.scoringMode)}</span>
-        <span>Normal x{formatMultiplier(normalMultiplier)}</span>
-        {currentBonus && <span className="bonusChip">BONUS x{formatMultiplier(currentBonus.multiplier)}</span>}
-        <span>Gesamt x{formatMultiplier(effectiveMultiplier)}</span>
-      </span>
-    </button>
-  );
-}
-
 function SavedStage({ savedRound }) {
   return (
     <div className="flowStage savedStage" aria-live="polite">
@@ -203,6 +180,26 @@ function SavedStage({ savedRound }) {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+function SetupAccordionSection({ title, meta, open, onToggle, children }) {
+  return (
+    <div className={`setupAccordion ${open ? "open" : ""}`}>
+      <button
+        className="setupAccordionHead"
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+      >
+        <span>
+          <b>{title}</b>
+          {meta && <small>{meta}</small>}
+        </span>
+        <strong>{open ? "Einklappen" : "Aufklappen"} ˅</strong>
+      </button>
+      {open && <div className="setupAccordionBody">{children}</div>}
     </div>
   );
 }
@@ -230,7 +227,12 @@ function App({ room = "", hostKey = "" } = {}) {
   );
   const [setupOpen, setSetupOpen] = useState(true);
   const [setupGamesOpen, setSetupGamesOpen] = useState(true);
-  const [setupPlayersOpen, setSetupPlayersOpen] = useState(false);
+  const [setupPlayersOpen, setSetupPlayersOpen] = useState(true);
+  const [setupPresetsOpen, setSetupPresetsOpen] = useState(false);
+  const [setupTeamsOpen, setSetupTeamsOpen] = useState(false);
+  const [setupScoringOpen, setSetupScoringOpen] = useState(true);
+  const [setupWheelOpen, setSetupWheelOpen] = useState(false);
+  const [setupSoundsOpen, setSetupSoundsOpen] = useState(false);
   const [gameName, setGameName] = useState("");
   const [playerName, setPlayerName] = useState("");
   const [tournament, setTournament] = useState(null);
@@ -239,6 +241,7 @@ function App({ room = "", hostKey = "" } = {}) {
   const [roundEvaluationMode, setRoundEvaluationMode] = useState("individualPlacement");
   const [winnerTeamId, setWinnerTeamId] = useState("");
   const [teamScoreDraft, setTeamScoreDraft] = useState({});
+  const [riskSelections, setRiskSelections] = useState({});
   const [toast, setToast] = useState("");
   const [resetArmed, setResetArmed] = useState(false);
   const [undoArmed, setUndoArmed] = useState(false);
@@ -264,10 +267,13 @@ function App({ room = "", hostKey = "" } = {}) {
   const deleteLogTimerRef = useRef(null);
   const countdownTimerRef = useRef(null);
   const revealTimerRef = useRef(null);
+  const startTransitionTimerRef = useRef(null);
+  const winnerTransitionTimerRef = useRef(null);
   const savedTimerRef = useRef(null);
   const lastCountdownSoundRef = useRef(null);
   const lastRevealSoundRef = useRef(null);
   const lastSavedSoundRef = useRef(null);
+  const lastStartTransitionSoundRef = useRef(null);
   const lastWinnerSoundRef = useRef(null);
 
   const getSetupRounds = useCallback((gameId) => setupRounds[gameId] ?? 1, [setupRounds]);
@@ -346,6 +352,8 @@ function App({ room = "", hostKey = "" } = {}) {
       window.clearTimeout(deleteLogTimerRef.current);
       window.clearTimeout(countdownTimerRef.current);
       window.clearTimeout(revealTimerRef.current);
+      window.clearTimeout(startTransitionTimerRef.current);
+      window.clearTimeout(winnerTransitionTimerRef.current);
       window.clearTimeout(savedTimerRef.current);
     };
   }, []);
@@ -442,6 +450,7 @@ function App({ room = "", hostKey = "" } = {}) {
         roundEvaluationMode,
         winnerTeamId,
         teamScoreDraft,
+        riskSelections,
       },
       roomSlug,
       hostKey
@@ -451,6 +460,7 @@ function App({ room = "", hostKey = "" } = {}) {
     placements,
     roomSlug,
     roundEvaluationMode,
+    riskSelections,
     scoreDraft,
     teamScoreDraft,
     tournament,
@@ -480,6 +490,43 @@ function App({ room = "", hostKey = "" } = {}) {
     return tournament.games.find((game) => game.id === tournament.currentPickGameId) || null;
   }, [tournament]);
 
+  const currentRevealInfo = useMemo(() => {
+    if (!tournament || !currentGame) return null;
+
+    const currentSpecialRound = tournament.currentSpecialRound ?? null;
+    const currentMinusRound = currentSpecialRound?.type === "minus"
+      ? { active: true, pointsStep: currentSpecialRound.config?.pointsStep ?? 0 }
+      : tournament.currentMinusRound?.active ? tournament.currentMinusRound : null;
+    const currentBonus = currentSpecialRound?.type === "bonus"
+      ? { active: true, multiplier: currentSpecialRound.config?.multiplier ?? 1 }
+      : !currentMinusRound && tournament.currentBonus?.active ? tournament.currentBonus : null;
+    const normalMultiplier = roundMultiplier(tournament, currentGame);
+    const effectiveMultiplier = currentMinusRound ? 1 : normalMultiplier * (currentBonus?.multiplier ?? 1);
+    const normalizedRoundEvaluationMode = normalizeRoundEvaluationMode(
+      roundEvaluationMode,
+      currentGame.scoringMode,
+      tournament.teamModeEnabled === true
+    );
+
+    return {
+      variant: currentSpecialRound?.type && !["bonus", "minus"].includes(currentSpecialRound.type)
+        ? currentSpecialRound.type
+        : currentMinusRound ? "minus" : currentBonus ? "bonus" : "game",
+      gameName: currentGame.name,
+      roundLabel: `Spiel-Runde ${currentGame.playedRounds + 1}/${currentGame.totalRounds}`,
+      tournamentRound: `TR ${tournament.globalRound + 1}`,
+      scoringLabel: currentSpecialRound
+        ? specialRoundText(currentSpecialRound)
+        : roundEvaluationModeLabel(normalizedRoundEvaluationMode),
+      bonusActive: Boolean(currentBonus),
+      bonusMultiplier: currentBonus?.multiplier ?? 1,
+      minusRoundActive: Boolean(currentMinusRound),
+      minusRoundStep: currentMinusRound?.pointsStep ?? 0,
+      specialRound: currentSpecialRound,
+      totalMultiplier: effectiveMultiplier,
+    };
+  }, [currentGame, roundEvaluationMode, tournament]);
+
   const remainingTotal = useMemo(() => {
     if (!tournament) return 0;
     return tournament.games.reduce((sum, game) => sum + game.remainingRounds, 0);
@@ -489,11 +536,30 @@ function App({ room = "", hostKey = "" } = {}) {
       .filter((game) => selectedGameIds.has(game.id))
       .reduce((sum, game) => sum + getSetupRounds(game.id), 0);
   }, [getSetupRounds, presetsGames, selectedGameIds]);
+  const normalizedSetupScoring = useMemo(
+    () => normalizeScoringSettings(tournament?.scoringSettings ?? scoringSettings, scoringPlaceCount),
+    [scoringPlaceCount, scoringSettings, tournament?.scoringSettings]
+  );
 
   const tournamentFinished = Boolean(tournament) && openGames.length === 0 && !currentGame;
   const finishedTournamentSummary = useMemo(() => {
     return tournamentFinished ? buildFinishedTournamentSummary(tournament) : null;
   }, [tournament, tournamentFinished]);
+
+  const winnerTransitionInfo = useMemo(() => {
+    if (!finishedTournamentSummary) return null;
+
+    const teamWinner = finishedTournamentSummary.teamModeEnabled
+      ? finishedTournamentSummary.teamRanking?.[0]
+      : null;
+    const playerWinner = finishedTournamentSummary.ranking?.[0] ?? null;
+    const winner = teamWinner ?? playerWinner;
+
+    return {
+      winnerName: winner?.name ?? "Unentschieden",
+      winnerLabel: teamWinner ? "Bestes Team" : "Gewinner",
+    };
+  }, [finishedTournamentSummary]);
 
   const leaderboard = useMemo(() => {
     if (!tournament) return [];
@@ -540,7 +606,7 @@ function App({ room = "", hostKey = "" } = {}) {
     countdownTimerRef.current = window.setTimeout(() => {
       setCountdownIndex((index) => {
         if (index >= COUNTDOWN_STEPS.length - 1) {
-          setUiPhase("wheel");
+          setUiPhase("startTransition");
           return index;
         }
 
@@ -557,11 +623,36 @@ function App({ room = "", hostKey = "" } = {}) {
     if (uiPhase !== "reveal" || !currentGame) return undefined;
 
     revealTimerRef.current = window.setTimeout(() => {
-      setUiPhase("roundEntry");
-    }, 2300);
+      setUiPhase((phase) => (phase === "reveal" ? "roundEntry" : phase));
+    }, currentRevealInfo?.variant === "bonus" || currentRevealInfo?.variant === "minus" ? 5400 : 4800);
 
     return () => window.clearTimeout(revealTimerRef.current);
-  }, [currentGame, uiPhase]);
+  }, [currentGame, currentRevealInfo?.variant, uiPhase]);
+
+  useEffect(() => {
+    window.clearTimeout(startTransitionTimerRef.current);
+
+    if (uiPhase !== "startTransition") return undefined;
+
+    startTransitionTimerRef.current = window.setTimeout(() => {
+      setUiPhase((phase) => (phase === "startTransition" ? "wheel" : phase));
+    }, 3300);
+
+    return () => window.clearTimeout(startTransitionTimerRef.current);
+  }, [uiPhase]);
+
+  useEffect(() => {
+    window.clearTimeout(winnerTransitionTimerRef.current);
+
+    if (uiPhase !== "winnerTransition") return undefined;
+
+    winnerTransitionTimerRef.current = window.setTimeout(() => {
+      setUiPhase((phase) => (phase === "winnerTransition" ? "wheel" : phase));
+      setShowWinningScreen(true);
+    }, 5800);
+
+    return () => window.clearTimeout(winnerTransitionTimerRef.current);
+  }, [uiPhase]);
 
   useEffect(() => {
     window.clearTimeout(savedTimerRef.current);
@@ -603,6 +694,17 @@ function App({ room = "", hostKey = "" } = {}) {
   }, [currentGame, playReveal, tournament?.globalRound, uiPhase]);
 
   useEffect(() => {
+    if (uiPhase !== "startTransition") {
+      lastStartTransitionSoundRef.current = null;
+      return;
+    }
+
+    if (lastStartTransitionSoundRef.current === "active") return;
+    lastStartTransitionSoundRef.current = "active";
+    playReveal();
+  }, [playReveal, uiPhase]);
+
+  useEffect(() => {
     if (uiPhase !== "saved" || !savedRoundInfo) return;
 
     const key = `${savedRoundInfo.gameName}:${savedRoundInfo.globalRound}:${savedRoundInfo.totalPoints}`;
@@ -612,13 +714,14 @@ function App({ room = "", hostKey = "" } = {}) {
   }, [playSave, savedRoundInfo, uiPhase]);
 
   useEffect(() => {
-    if (!showWinningScreen || !finishedTournamentSummary || !tournament) return;
+    if (!finishedTournamentSummary || !tournament) return;
+    if (uiPhase !== "winnerTransition" && !showWinningScreen) return;
 
     const key = `${tournament.log[0]?.id ?? "finished"}:${tournament.globalRound}`;
     if (lastWinnerSoundRef.current === key) return;
     lastWinnerSoundRef.current = key;
     playWinner();
-  }, [finishedTournamentSummary, playWinner, showWinningScreen, tournament]);
+  }, [finishedTournamentSummary, playWinner, showWinningScreen, tournament, uiPhase]);
 
   function continueSavedTournament() {
     if (!restoreCandidate?.valid) return;
@@ -637,6 +740,7 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode(saved.roundEvaluationMode);
     setWinnerTeamId(saved.winnerTeamId);
     setTeamScoreDraft(saved.teamScoreDraft);
+    setRiskSelections(saved.riskSelections ?? {});
     setManualPickerOpen(false);
     setSetupOpen(false);
     setUiPhase(saved.tournament.currentPickGameId ? "roundEntry" : "wheel");
@@ -794,6 +898,91 @@ function App({ room = "", hostKey = "" } = {}) {
             MIN_BONUS_CHANCE,
             MAX_BONUS_CHANCE
           ),
+        },
+        scoringPlaceCount
+      );
+    });
+  }
+
+  function changeMinusRoundEnabled(checked) {
+    if (tournament) return;
+
+    setScoringSettings((current) => {
+      const normalized = normalizeScoringSettings(current, scoringPlaceCount);
+      return normalizeScoringSettings(
+        {
+          ...normalized,
+          minusRoundEnabled: checked,
+        },
+        scoringPlaceCount
+      );
+    });
+  }
+
+  function changeMinusRoundChance(value) {
+    if (tournament) return;
+
+    setScoringSettings((current) => {
+      const normalized = normalizeScoringSettings(current, scoringPlaceCount);
+      return normalizeScoringSettings(
+        {
+          ...normalized,
+          minusRoundChance: normalizeNumber(
+            value,
+            normalized.minusRoundChance,
+            MIN_MINUS_ROUND_CHANCE,
+            MAX_MINUS_ROUND_CHANCE
+          ),
+        },
+        scoringPlaceCount
+      );
+    });
+  }
+
+  function changeMinusRoundPointsStep(value) {
+    if (tournament) return;
+
+    setScoringSettings((current) => {
+      const normalized = normalizeScoringSettings(current, scoringPlaceCount);
+      return normalizeScoringSettings(
+        {
+          ...normalized,
+          minusRoundPointsStep: normalizeNumber(
+            value,
+            normalized.minusRoundPointsStep,
+            MIN_MINUS_ROUND_POINTS_STEP,
+            MAX_MINUS_ROUND_POINTS_STEP
+          ),
+        },
+        scoringPlaceCount
+      );
+    });
+  }
+
+  function changeScoringBoolean(field, checked) {
+    if (tournament) return;
+
+    setScoringSettings((current) => {
+      const normalized = normalizeScoringSettings(current, scoringPlaceCount);
+      return normalizeScoringSettings(
+        {
+          ...normalized,
+          [field]: checked === true,
+        },
+        scoringPlaceCount
+      );
+    });
+  }
+
+  function changeScoringNumber(field, value, min, max) {
+    if (tournament) return;
+
+    setScoringSettings((current) => {
+      const normalized = normalizeScoringSettings(current, scoringPlaceCount);
+      return normalizeScoringSettings(
+        {
+          ...normalized,
+          [field]: normalizeNumber(value, normalized[field], min, max),
         },
         scoringPlaceCount
       );
@@ -1166,6 +1355,7 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode("individualPlacement");
     setWinnerTeamId("");
     setTeamScoreDraft({});
+    setRiskSelections({});
     setManualPickerOpen(false);
     setSetupOpen(false);
     setCountdownIndex(0);
@@ -1192,6 +1382,7 @@ function App({ room = "", hostKey = "" } = {}) {
     setTeamScoreDraft(
       Object.fromEntries((tournament?.teams ?? []).map((team) => [team.id, ""]))
     );
+    setRiskSelections({});
     setTournament((current) => TournamentEngine.setCurrentPick(current, gameId));
     setUiPhase("reveal");
     setRuntimePanel("games");
@@ -1265,6 +1456,13 @@ function App({ room = "", hostKey = "" } = {}) {
     });
   }
 
+  function setRiskSelection(playerId, checked) {
+    setRiskSelections((current) => ({
+      ...current,
+      [playerId]: checked === true,
+    }));
+  }
+
   function submitRound() {
     const result = TournamentEngine.saveRound(tournament, {
       placements,
@@ -1272,6 +1470,7 @@ function App({ room = "", hostKey = "" } = {}) {
       roundEvaluationMode,
       winnerTeamId,
       teamScoresByTeam: teamScoreDraft,
+      riskSelections,
     });
     if (!result.ok) {
       if (result.message) showToast(result.message);
@@ -1295,16 +1494,17 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode("individualPlacement");
     setWinnerTeamId("");
     setTeamScoreDraft({});
+    setRiskSelections({});
     setManualPickerOpen(false);
     setSavedRoundInfo({
       gameName: latestEntry?.gameName ?? currentGame?.name ?? "Game",
       globalRound: latestEntry?.globalRound ?? result.tournament.globalRound,
       totalPoints,
     });
-    setUiPhase(finishedAfterSave ? "wheel" : "saved");
+    setUiPhase(finishedAfterSave ? "winnerTransition" : "saved");
     if (finishedAfterSave) {
       playSave();
-      setShowWinningScreen(true);
+      setShowWinningScreen(false);
     }
     setSavedFinishedTournamentId(null);
     clearUndoConfirmation();
@@ -1325,11 +1525,12 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode("individualPlacement");
     setWinnerTeamId("");
     setTeamScoreDraft({});
+    setRiskSelections({});
     setManualPickerOpen(false);
-    setUiPhase("wheel");
+    setUiPhase(finishedAfterSkip ? "winnerTransition" : "wheel");
     setRuntimePanel("games");
     setSavedRoundInfo(null);
-    if (finishedAfterSkip) setShowWinningScreen(true);
+    if (finishedAfterSkip) setShowWinningScreen(false);
     setSavedFinishedTournamentId(null);
   }
 
@@ -1362,6 +1563,7 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode("individualPlacement");
     setWinnerTeamId("");
     setTeamScoreDraft({});
+    setRiskSelections({});
     setManualPickerOpen(false);
     setUiPhase("wheel");
     setRuntimePanel("games");
@@ -1399,6 +1601,7 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode("individualPlacement");
     setWinnerTeamId("");
     setTeamScoreDraft({});
+    setRiskSelections({});
     setManualPickerOpen(false);
     setUiPhase("wheel");
     setRuntimePanel("history");
@@ -1457,6 +1660,7 @@ function App({ room = "", hostKey = "" } = {}) {
     setRoundEvaluationMode("individualPlacement");
     setWinnerTeamId("");
     setTeamScoreDraft({});
+    setRiskSelections({});
     setManualPickerOpen(false);
     setSetupOpen(true);
     setUiPhase("setup");
@@ -1660,6 +1864,20 @@ function App({ room = "", hostKey = "" } = {}) {
                   Runden
                 </span>
               </div>
+              <div className="setupRuleBadges">
+                <span className={normalizedSetupScoring.bonusEnabled ? "active" : ""}>
+                  Bonus {normalizedSetupScoring.bonusEnabled ? "aktiv" : "aus"}
+                </span>
+                <span className={normalizedSetupScoring.minusRoundEnabled ? "minusActive" : ""}>
+                  Minusrunden {normalizedSetupScoring.minusRoundEnabled ? "aktiv" : "aus"}
+                </span>
+                <span className={teamModeEnabled ? "active" : ""}>
+                  Teams {teamModeEnabled ? "aktiv" : "aus"}
+                </span>
+                <span>
+                  Wheel {wheelSettings.noRepeat ? "No Repeat" : "Normal"}
+                </span>
+              </div>
 
               <div className={`setupAccordion ${setupGamesOpen ? "open" : ""}`}>
                 <button
@@ -1743,57 +1961,97 @@ function App({ room = "", hostKey = "" } = {}) {
                 )}
               </div>
 
-              <PresetTransferPanel
-                importMode={presetImportMode}
-                locked={!!tournament}
-                onImportModeChange={setPresetImportMode}
-                onExport={exportPresets}
-                onImportFile={importPresets}
-              />
+              <SetupAccordionSection
+                title="Teams"
+                meta={teamModeEnabled ? `${teamsWithPlayers(setupTeams).length} aktive Teams` : "Teammodus aus"}
+                open={setupTeamsOpen}
+                onToggle={() => setSetupTeamsOpen((open) => !open)}
+              >
+                <TeamSettingsPanel
+                  enabled={teamModeEnabled}
+                  teams={setupTeams}
+                  players={selectedPlayers}
+                  locked={!!tournament}
+                  randomTeamCount={randomTeamCount}
+                  onEnabledChange={changeTeamModeEnabled}
+                  onAddTeam={addTeam}
+                  onDeleteTeam={deleteTeam}
+                  onRenameTeam={renameTeam}
+                  onAssignPlayer={assignPlayerToTeam}
+                  onRandomTeamCountChange={setRandomTeamCount}
+                  onCreateRandomTeams={createRandomTeams}
+                />
+              </SetupAccordionSection>
 
-              <TeamSettingsPanel
-                enabled={teamModeEnabled}
-                teams={setupTeams}
-                players={selectedPlayers}
-                locked={!!tournament}
-                randomTeamCount={randomTeamCount}
-                onEnabledChange={changeTeamModeEnabled}
-                onAddTeam={addTeam}
-                onDeleteTeam={deleteTeam}
-                onRenameTeam={renameTeam}
-                onAssignPlayer={assignPlayerToTeam}
-                onRandomTeamCountChange={setRandomTeamCount}
-                onCreateRandomTeams={createRandomTeams}
-              />
+              <SetupAccordionSection
+                title="Punkte / Bonus / Minusrunde"
+                meta={`${normalizedSetupScoring.multiplierEnabled ? "Multiplikator aktiv" : "Multiplikator aus"} · Bonus ${normalizedSetupScoring.bonusEnabled ? "an" : "aus"} · Minus ${normalizedSetupScoring.minusRoundEnabled ? "an" : "aus"}`}
+                open={setupScoringOpen}
+                onToggle={() => setSetupScoringOpen((open) => !open)}
+              >
+                <ScoringSettingsPanel
+                  settings={scoringSettings}
+                  placeCount={scoringPlaceCount}
+                  locked={!!tournament}
+                  onPointChange={changeScoringPoint}
+                  onMultiplierEnabledChange={changeMultiplierEnabled}
+                  onMultiplierChange={changeScoringMultiplier}
+                  onMultiplierModeChange={changeMultiplierMode}
+                  onBonusEnabledChange={changeBonusEnabled}
+                  onBonusMultiplierChange={changeBonusMultiplier}
+                  onBonusChanceChange={changeBonusChance}
+                  onMinusRoundEnabledChange={changeMinusRoundEnabled}
+                  onMinusRoundChanceChange={changeMinusRoundChance}
+                  onMinusRoundPointsStepChange={changeMinusRoundPointsStep}
+                  onScoringBooleanChange={changeScoringBoolean}
+                  onScoringNumberChange={changeScoringNumber}
+                  onReset={resetScoringSettings}
+                />
+              </SetupAccordionSection>
 
-              <ScoringSettingsPanel
-                settings={scoringSettings}
-                placeCount={scoringPlaceCount}
-                locked={!!tournament}
-                onPointChange={changeScoringPoint}
-                onMultiplierEnabledChange={changeMultiplierEnabled}
-                onMultiplierChange={changeScoringMultiplier}
-                onMultiplierModeChange={changeMultiplierMode}
-                onBonusEnabledChange={changeBonusEnabled}
-                onBonusMultiplierChange={changeBonusMultiplier}
-                onBonusChanceChange={changeBonusChance}
-                onReset={resetScoringSettings}
-              />
+              <SetupAccordionSection
+                title="Glücksrad"
+                meta={`${wheelSettings.noRepeat ? "No Repeat an" : "No Repeat aus"}`}
+                open={setupWheelOpen}
+                onToggle={() => setSetupWheelOpen((open) => !open)}
+              >
+                <WheelSettingsPanel
+                  settings={wheelSettings}
+                  locked={!!tournament}
+                  onWeightModeChange={changeWheelWeightMode}
+                  onNoRepeatChange={changeWheelNoRepeat}
+                />
+              </SetupAccordionSection>
 
-              <WheelSettingsPanel
-                settings={wheelSettings}
-                locked={!!tournament}
-                onWeightModeChange={changeWheelWeightMode}
-                onNoRepeatChange={changeWheelNoRepeat}
-              />
+              <SetupAccordionSection
+                title="Presets"
+                meta="Import / Export"
+                open={setupPresetsOpen}
+                onToggle={() => setSetupPresetsOpen((open) => !open)}
+              >
+                <PresetTransferPanel
+                  importMode={presetImportMode}
+                  locked={!!tournament}
+                  onImportModeChange={setPresetImportMode}
+                  onExport={exportPresets}
+                  onImportFile={importPresets}
+                />
+              </SetupAccordionSection>
 
-              <SoundSettingsPanel
-                settings={soundSettings}
-                onEnabledChange={changeSoundEnabled}
-                onVolumeChange={changeSoundVolume}
-                onToggleCategory={changeSoundCategory}
-                onTestSound={testSound}
-              />
+              <SetupAccordionSection
+                title="Sounds"
+                meta={soundSettings.enabled ? "aktiv" : "aus"}
+                open={setupSoundsOpen}
+                onToggle={() => setSetupSoundsOpen((open) => !open)}
+              >
+                <SoundSettingsPanel
+                  settings={soundSettings}
+                  onEnabledChange={changeSoundEnabled}
+                  onVolumeChange={changeSoundVolume}
+                  onToggleCategory={changeSoundCategory}
+                  onTestSound={testSound}
+                />
+              </SetupAccordionSection>
 
               <div className="hr" />
 
@@ -1825,23 +2083,31 @@ function App({ room = "", hostKey = "" } = {}) {
               <div className="head">
                 <h2>Glücksrad</h2>
                 <div className="row">
-                  <WheelControls
-                    spinning={wheel.spinning}
-                    currentGame={currentGame}
-                    canManualPick={canManualPick}
-                    manualPickerOpen={manualPickerVisible}
-                    flowLocked={Boolean(tournament) && uiPhase !== "wheel"}
-                    onSpin={wheel.spin}
-                    onToggleManualPicker={toggleManualPicker}
-                  />
-                  <button
-                    className="btn secondary"
-                    type="button"
-                    disabled={!tournament?.currentPickGameId}
-                    onClick={skipGame}
-                  >
-                    Skip Game
-                  </button>
+                  {tournament ? (
+                    <>
+                      <WheelControls
+                        spinning={wheel.spinning}
+                        currentGame={currentGame}
+                        canManualPick={canManualPick}
+                        manualPickerOpen={manualPickerVisible}
+                        flowLocked={uiPhase !== "wheel"}
+                        onSpin={wheel.spin}
+                        onToggleManualPicker={toggleManualPicker}
+                      />
+                      <button
+                        className="btn secondary"
+                        type="button"
+                        disabled={!tournament.currentPickGameId}
+                        onClick={skipGame}
+                      >
+                        Skip Game
+                      </button>
+                    </>
+                  ) : (
+                    <span className="pill">
+                      <span className="dot" /> Glücksrad-Vorschau
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -1858,7 +2124,7 @@ function App({ room = "", hostKey = "" } = {}) {
                         games={wheelEntries}
                         wheelAngle={wheel.wheelAngle}
                         spinning={wheel.spinning}
-                        locked={Boolean(tournament) && uiPhase !== "wheel"}
+                        locked={!tournament || uiPhase !== "wheel"}
                         onSpin={wheel.spin}
                       />
                     )}
@@ -1892,6 +2158,16 @@ function App({ room = "", hostKey = "" } = {}) {
                       onSelect={setCurrentPick}
                     />
 
+                    {uiPhase === "startTransition" && (
+                      <OlympiadeTransition
+                        active
+                        variant="start"
+                        onComplete={() =>
+                          setUiPhase((phase) => (phase === "startTransition" ? "wheel" : phase))
+                        }
+                      />
+                    )}
+
                     {uiPhase !== "roundEntry" && uiPhase !== "saved" && (
                       <PickedGame
                         tournament={tournament}
@@ -1900,11 +2176,35 @@ function App({ room = "", hostKey = "" } = {}) {
                       />
                     )}
 
-                    {uiPhase === "reveal" && (
-                      <RevealStage
-                        tournament={tournament}
-                        currentGame={currentGame}
-                        onContinue={() => setUiPhase("roundEntry")}
+                    {uiPhase === "reveal" && currentRevealInfo && (
+                      <OlympiadeTransition
+                        active
+                        variant={currentRevealInfo.variant}
+                        gameName={currentRevealInfo.gameName}
+                        roundLabel={currentRevealInfo.roundLabel}
+                        tournamentRound={currentRevealInfo.tournamentRound}
+                        scoringLabel={currentRevealInfo.scoringLabel}
+                        bonusActive={currentRevealInfo.bonusActive}
+                        bonusMultiplier={currentRevealInfo.bonusMultiplier}
+                        minusRoundActive={currentRevealInfo.minusRoundActive}
+                        minusRoundStep={currentRevealInfo.minusRoundStep}
+                        totalMultiplier={currentRevealInfo.totalMultiplier}
+                        onComplete={() =>
+                          setUiPhase((phase) => (phase === "reveal" ? "roundEntry" : phase))
+                        }
+                      />
+                    )}
+
+                    {uiPhase === "winnerTransition" && (
+                      <OlympiadeTransition
+                        active
+                        variant="winner"
+                        winnerName={winnerTransitionInfo?.winnerName}
+                        winnerLabel={winnerTransitionInfo?.winnerLabel}
+                        onComplete={() => {
+                          setUiPhase((phase) => (phase === "winnerTransition" ? "wheel" : phase));
+                          setShowWinningScreen(true);
+                        }}
                       />
                     )}
 
@@ -1919,12 +2219,14 @@ function App({ room = "", hostKey = "" } = {}) {
                         roundEvaluationMode={roundEvaluationMode}
                         winnerTeamId={winnerTeamId}
                         teamScoreDraft={teamScoreDraft}
+                        riskSelections={riskSelections}
                         usedPlayerIds={usedPlayerIds}
                         onRoundEvaluationModeChange={changeRoundEvaluationMode}
                         onSetPlacement={setPlacement}
                         onSetScore={setScore}
                         onSetWinnerTeam={setWinnerTeamId}
                         onSetTeamScore={setTeamScore}
+                        onSetRiskSelection={setRiskSelection}
                         onSubmit={submitRound}
                       />
                     )}

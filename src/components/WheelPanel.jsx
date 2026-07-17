@@ -8,6 +8,8 @@ import {
   normalizeGameScoringMode,
   normalizeScoringSettings,
   roundMultiplier,
+  SPECIAL_ROUND_TYPES,
+  specialRoundText,
 } from "../utils/scoring";
 import {
   ROUND_EVALUATION_MODES,
@@ -116,8 +118,18 @@ function getRoundInfo(tournament, currentGame) {
 
   const scoringSettings = normalizeScoringSettings(tournament.scoringSettings, tournament.players.length);
   const normalMultiplier = roundMultiplier(tournament, currentGame);
-  const currentBonus = currentGame && tournament.currentBonus?.active ? tournament.currentBonus : null;
-  const effectiveMultiplier = normalMultiplier * (currentBonus?.multiplier ?? 1);
+  const currentSpecialRound = currentGame ? tournament.currentSpecialRound ?? null : null;
+  const currentMinusRound = currentSpecialRound?.type === SPECIAL_ROUND_TYPES.minus
+    ? { active: true, pointsStep: currentSpecialRound.config?.pointsStep ?? 0 }
+    : currentGame && tournament.currentMinusRound?.active
+    ? tournament.currentMinusRound
+    : null;
+  const currentBonus = currentSpecialRound?.type === SPECIAL_ROUND_TYPES.bonus
+    ? { active: true, multiplier: currentSpecialRound.config?.multiplier ?? 1 }
+    : currentGame && !currentMinusRound && tournament.currentBonus?.active
+    ? tournament.currentBonus
+    : null;
+  const effectiveMultiplier = currentMinusRound ? 1 : normalMultiplier * (currentBonus?.multiplier ?? 1);
   const modeLabel = scoringSettings.multiplierEnabled
     ? multiplierModeLabel(scoringSettings.multiplierMode)
     : "Multiplikator aus";
@@ -132,6 +144,8 @@ function getRoundInfo(tournament, currentGame) {
       : "",
     normalMultiplier,
     currentBonus,
+    currentMinusRound,
+    currentSpecialRound,
     effectiveMultiplier,
   };
 }
@@ -312,9 +326,14 @@ export function PickedGame({ tournament, currentGame, remainingTotal }) {
   const roundInfo = getRoundInfo(tournament, currentGame);
   const pickedMeta = !tournament ? "Noch kein Turnier gestartet." : currentGame ? "Aktuelle Runde" : "Drehen.";
   const currentBonus = roundInfo?.currentBonus ?? null;
+  const currentMinusRound = roundInfo?.currentMinusRound ?? null;
+  const currentSpecialRound = roundInfo?.currentSpecialRound ?? null;
+  const otherSpecialRound = currentSpecialRound && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(currentSpecialRound.type)
+    ? currentSpecialRound
+    : null;
 
   return (
-    <div className={`row pickedRow ${currentBonus ? "bonusActive" : ""}`}>
+    <div className={`row pickedRow ${currentBonus ? "bonusActive" : ""} ${currentMinusRound ? "minusActive" : ""} ${otherSpecialRound ? `specialActive special-${otherSpecialRound.type}` : ""}`}>
       <div className="pickedText">
         <div className="big">{pickedGameText}</div>
         <div className="muted">{pickedMeta}</div>
@@ -324,9 +343,21 @@ export function PickedGame({ tournament, currentGame, remainingTotal }) {
             <span>{gameScoringModeLabel(roundInfo.scoringMode)}</span>
             <span>{roundInfo.gameRoundText}</span>
             <span>TR {roundInfo.globalRound}</span>
-            <span>Normal ×{formatMultiplier(roundInfo.normalMultiplier)}</span>
-            {currentBonus && <span>Bonus ×{formatMultiplier(currentBonus.multiplier)}</span>}
-            <span>Gesamt ×{formatMultiplier(roundInfo.effectiveMultiplier)}</span>
+            {currentMinusRound ? (
+              <span>MINUSRUNDE -{formatMultiplier(currentMinusRound.pointsStep)} pro Platz</span>
+            ) : otherSpecialRound ? (
+              <>
+                <span>{specialRoundText(otherSpecialRound)}</span>
+                <span>Normal ×{formatMultiplier(roundInfo.normalMultiplier)}</span>
+                <span>Gesamt ×{formatMultiplier(roundInfo.effectiveMultiplier)}</span>
+              </>
+            ) : (
+              <>
+                <span>Normal ×{formatMultiplier(roundInfo.normalMultiplier)}</span>
+                {currentBonus && <span>Bonus ×{formatMultiplier(currentBonus.multiplier)}</span>}
+                <span>Gesamt ×{formatMultiplier(roundInfo.effectiveMultiplier)}</span>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -339,6 +370,16 @@ export function PickedGame({ tournament, currentGame, remainingTotal }) {
         <span className="pill bonusPill">
           <span className="dot" /> BONUS ×{formatMultiplier(currentBonus.multiplier)} · Gesamt ×
           {formatMultiplier(roundInfo.effectiveMultiplier)}
+        </span>
+      )}
+      {currentMinusRound && (
+        <span className="pill minusPill">
+          <span className="dot" /> MINUSRUNDE · -{formatMultiplier(currentMinusRound.pointsStep)} pro Platz
+        </span>
+      )}
+      {otherSpecialRound && (
+        <span className={`pill specialPill specialPill-${otherSpecialRound.type}`}>
+          <span className="dot" /> {specialRoundText(otherSpecialRound)}
         </span>
       )}
     </div>
@@ -390,12 +431,14 @@ export function RoundEntry({
   roundEvaluationMode,
   winnerTeamId,
   teamScoreDraft = {},
+  riskSelections = {},
   usedPlayerIds,
   onRoundEvaluationModeChange,
   onSetPlacement,
   onSetScore,
   onSetWinnerTeam,
   onSetTeamScore,
+  onSetRiskSelection,
   onSubmit,
 }) {
   if (!tournament || !currentGame) return null;
@@ -403,6 +446,11 @@ export function RoundEntry({
   const scoringSnapshot = normalizeScoringSettings(tournament.scoringSettings, tournament.players.length);
   const roundInfo = getRoundInfo(tournament, currentGame);
   const currentBonus = roundInfo.currentBonus;
+  const currentMinusRound = roundInfo.currentMinusRound;
+  const currentSpecialRound = roundInfo.currentSpecialRound;
+  const otherSpecialRound = currentSpecialRound && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(currentSpecialRound.type)
+    ? currentSpecialRound
+    : null;
   const normalizedRoundEvaluationMode = normalizeRoundEvaluationMode(
     roundEvaluationMode,
     roundInfo.scoringMode,
@@ -424,18 +472,26 @@ export function RoundEntry({
       : isIndividualScore
         ? "Scores"
         : "Platzierungen";
-  const modeHint = `Normal ×${formatMultiplier(roundInfo.normalMultiplier)}`;
+  const modeHint = currentMinusRound
+    ? `MINUSRUNDE -${formatMultiplier(currentMinusRound.pointsStep)} pro Platz`
+    : otherSpecialRound
+      ? specialRoundText(otherSpecialRound)
+      : `Normal ×${formatMultiplier(roundInfo.normalMultiplier)}`;
   const bonusHint = currentBonus
     ? ` · BONUS ×${formatMultiplier(currentBonus.multiplier)} · Gesamt ×${formatMultiplier(roundInfo.effectiveMultiplier)}`
     : "";
-  const roundContext = scoringSnapshot.multiplierEnabled
+  const roundContext = currentMinusRound
+    ? `TR ${roundInfo.globalRound}`
+    : scoringSnapshot.multiplierEnabled
     ? roundInfo.multiplierMode === "perGame"
       ? `${roundInfo.multiplierModeLabel} · ${roundInfo.gameRoundText}`
       : `${roundInfo.multiplierModeLabel} · TR ${roundInfo.globalRound}`
     : `${roundInfo.multiplierModeLabel} · TR ${roundInfo.globalRound}`;
   const hint = `${roundContext} · ${modeHint}${bonusHint}`;
 
-  const pointsHint = isTeamWinner
+  const pointsHint = currentMinusRound
+    ? `Platz 1 = 0, danach -${formatMultiplier(currentMinusRound.pointsStep)} pro Platz`
+    : isTeamWinner
     ? `Gewinnerteam: ${formatPoints(basePointsForPlace(1, scoringSnapshot))} je Mitglied`
     : isTeamScore
       ? "Team-Score x Gesamt-Multiplikator je Mitglied"
@@ -444,7 +500,7 @@ export function RoundEntry({
         : `Basis: 1.=${formatPoints(basePointsForPlace(1, scoringSnapshot))}, 2.=${formatPoints(basePointsForPlace(2, scoringSnapshot))}`;
 
   return (
-    <div className={`roundEntry liveRoundCard ${currentBonus ? "bonusActive" : ""}`}>
+    <div className={`roundEntry liveRoundCard ${currentBonus ? "bonusActive" : ""} ${currentMinusRound ? "minusActive" : ""} ${otherSpecialRound ? `specialActive special-${otherSpecialRound.type}` : ""}`}>
       <div className="liveRoundHero">
         <div className="liveRoundMain">
           <div className="muted">Aktuelle Runde</div>
@@ -453,9 +509,21 @@ export function RoundEntry({
             <span>{roundInfo.gameRoundText}</span>
             <span>TR {roundInfo.globalRound}</span>
             <span>{gameScoringModeLabel(roundInfo.scoringMode)}</span>
-            <span>Normal ×{formatMultiplier(roundInfo.normalMultiplier)}</span>
-            {currentBonus && <span>Bonus ×{formatMultiplier(currentBonus.multiplier)}</span>}
-            <span>Gesamt ×{formatMultiplier(roundInfo.effectiveMultiplier)}</span>
+            {currentMinusRound ? (
+              <span>MINUSRUNDE -{formatMultiplier(currentMinusRound.pointsStep)} pro Platz</span>
+            ) : otherSpecialRound ? (
+              <>
+                <span>{specialRoundText(otherSpecialRound)}</span>
+                <span>Normal ×{formatMultiplier(roundInfo.normalMultiplier)}</span>
+                <span>Gesamt ×{formatMultiplier(roundInfo.effectiveMultiplier)}</span>
+              </>
+            ) : (
+              <>
+                <span>Normal ×{formatMultiplier(roundInfo.normalMultiplier)}</span>
+                {currentBonus && <span>Bonus ×{formatMultiplier(currentBonus.multiplier)}</span>}
+                <span>Gesamt ×{formatMultiplier(roundInfo.effectiveMultiplier)}</span>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -510,10 +578,38 @@ export function RoundEntry({
             {formatMultiplier(roundInfo.effectiveMultiplier)}
           </span>
         )}
+        {currentMinusRound && (
+          <span className="pill minusPill">
+            <span className="dot" /> MINUSRUNDE · -{formatMultiplier(currentMinusRound.pointsStep)} pro Platz
+          </span>
+        )}
+        {otherSpecialRound && (
+          <span className={`pill specialPill specialPill-${otherSpecialRound.type}`}>
+            <span className="dot" /> {specialRoundText(otherSpecialRound)}
+          </span>
+        )}
         <button className="btn ok saveRoundBtn" type="button" onClick={onSubmit}>
           Speichern
         </button>
       </div>
+
+      {otherSpecialRound?.type === SPECIAL_ROUND_TYPES.risk && (
+        <div className="riskSelectionPanel">
+          <div className="section-title">Risiko wählen</div>
+          <div className="riskSelectionGrid">
+            {tournament.players.map((player) => (
+              <label key={player.id} className={`riskSelectionItem ${riskSelections[player.id] ? "active" : ""}`}>
+                <input
+                  type="checkbox"
+                  checked={riskSelections[player.id] === true}
+                  onChange={(event) => onSetRiskSelection?.(player.id, event.target.checked)}
+                />
+                <span>{player.name} geht Risiko</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {isIndividualScore ? (
         <div className="scoreEntryGrid placementGrid">
@@ -598,7 +694,9 @@ export function RoundEntry({
           })}
         </div>
       ) : null}
-      <div className="muted points-hint">{pointsHint} x{formatMultiplier(roundInfo.effectiveMultiplier)}</div>
+      <div className="muted points-hint">
+        {currentMinusRound ? pointsHint : `${pointsHint} x${formatMultiplier(roundInfo.effectiveMultiplier)}`}
+      </div>
     </div>
   );
 }

@@ -1,11 +1,17 @@
 import { uid } from "../utils/common";
 import {
   basePointsByPlaceForPlayers,
-  createCurrentBonus,
+  createCurrentRoundModifiers,
+  effectiveSpecialRoundType,
   normalizeCurrentBonus,
+  normalizeCurrentMinusRound,
+  normalizeCurrentSpecialRound,
   normalizeGameScoringMode,
   normalizeScoringSettings,
+  minusPointsForPlace,
   roundMultiplier,
+  SPECIAL_ROUND_TYPES,
+  specialRoundLabel,
 } from "../utils/scoring";
 import { isPlainObject } from "../utils/validation";
 import {
@@ -87,6 +93,336 @@ function previousPickedGameId(log, games) {
   return resolveLogGameId(log[0], games) || null;
 }
 
+function minusPointsByPlace(place, pointsStep) {
+  return minusPointsForPlace(place, pointsStep);
+}
+
+function rankedPlacesByScore(items) {
+  const sorted = [...items].sort((a, b) => b.score - a.score);
+
+  return sorted.map((item, index) => {
+    const firstSameScore = sorted.findIndex((row) => row.score === item.score);
+    return {
+      ...item,
+      place: firstSameScore >= 0 ? firstSameScore + 1 : index + 1,
+    };
+  });
+}
+
+function currentSpecialRoundFromTournament(tournament, scoringSettings) {
+  const normalized = normalizeCurrentSpecialRound(
+    tournament.currentSpecialRound,
+    scoringSettings,
+    Boolean(tournament.currentPickGameId)
+  );
+  if (normalized) return normalized;
+
+  const bonus = normalizeCurrentBonus(
+    tournament.currentBonus,
+    scoringSettings,
+    Boolean(tournament.currentPickGameId)
+  );
+  if (bonus?.active) {
+    return {
+      type: SPECIAL_ROUND_TYPES.bonus,
+      label: specialRoundLabel(SPECIAL_ROUND_TYPES.bonus),
+      config: { multiplier: bonus.multiplier },
+    };
+  }
+
+  const minus = normalizeCurrentMinusRound(
+    tournament.currentMinusRound,
+    scoringSettings,
+    Boolean(tournament.currentPickGameId)
+  );
+  if (minus?.active) {
+    return {
+      type: SPECIAL_ROUND_TYPES.minus,
+      label: specialRoundLabel(SPECIAL_ROUND_TYPES.minus),
+      config: { pointsStep: minus.pointsStep },
+    };
+  }
+
+  return null;
+}
+
+function addDelta(pointsByPlayer, playerId, delta) {
+  if (!playerId || !Number.isFinite(Number(delta)) || Number(delta) === 0) return;
+  pointsByPlayer[playerId] = safePoint(pointsByPlayer[playerId]) + Number(delta);
+}
+
+function nameById(items, id) {
+  return items.find((item) => item.id === id)?.name ?? "?";
+}
+
+function teamTotalsFromPlayers(players, teams) {
+  return teams.map((team) => ({
+    ...team,
+    total: team.playerIds.reduce((sum, playerId) => {
+      const player = players.find((item) => item.id === playerId);
+      return sum + safePoint(player?.total);
+    }, 0),
+  }));
+}
+
+function individualPlacesFromPlacements(placements) {
+  return placements.map((playerId, index) => ({
+    playerId,
+    place: index + 1,
+  }));
+}
+
+function placesByPlayerFromTeamPlaces(teamPlaces) {
+  const result = {};
+  teamPlaces.forEach((teamPlace) => {
+    teamPlace.playerIds.forEach((playerId) => {
+      result[playerId] = teamPlace.place;
+    });
+  });
+  return result;
+}
+
+function applySpecialRoundEffects({
+  tournament,
+  entry,
+  pointsByPlayer,
+  individualPlaces = [],
+  teamPlaces = [],
+  teams = [],
+  riskSelections = {},
+}) {
+  const type = effectiveSpecialRoundType(entry.currentSpecialRound ?? entry);
+  if (!type) {
+    return { entry, pointsByPlayer };
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.bonus || type === SPECIAL_ROUND_TYPES.minus) {
+    if (entry.specialRoundHidden) {
+      return {
+        entry: {
+          ...entry,
+          specialRoundResult: `Geheimrunde aufgedeckt: ${specialRoundLabel(type)}`,
+        },
+        pointsByPlayer,
+      };
+    }
+    return { entry, pointsByPlayer };
+  }
+
+  const config = isPlainObject(entry.specialRoundConfig) ? entry.specialRoundConfig : {};
+  const nextPoints = { ...pointsByPlayer };
+  const specialResultParts = [];
+  const nextEntry = { ...entry };
+  const teamRound = teamPlaces.length > 0;
+  const places = teamRound ? teamPlaces : individualPlaces;
+
+  function placeWinners() {
+    if (places.length === 0) return [];
+    const bestPlace = Math.min(...places.map((row) => row.place));
+    return places.filter((row) => row.place === bestPlace);
+  }
+
+  function placeLosers() {
+    if (places.length === 0) return [];
+    const worstPlace = Math.max(...places.map((row) => row.place));
+    return places.filter((row) => row.place === worstPlace);
+  }
+
+  function applyToPlacedRow(row, delta) {
+    if (teamRound) {
+      row.playerIds.forEach((playerId) => addDelta(nextPoints, playerId, delta));
+    } else {
+      addDelta(nextPoints, row.playerId, delta);
+    }
+  }
+
+  function placedRowName(row) {
+    return teamRound ? teamName(teams, row.teamId) : nameById(tournament.players, row.playerId);
+  }
+
+  function placedRowId(row) {
+    return teamRound ? row.teamId : row.playerId;
+  }
+
+  if (entry.specialRoundHidden) {
+    specialResultParts.push(`Geheimrunde aufgedeckt: ${specialRoundLabel(type)}`);
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.jackpot || type === SPECIAL_ROUND_TYPES.mystery) {
+    const bonusPoints = safePoint(type === SPECIAL_ROUND_TYPES.mystery ? config.bonusPoints : config.bonusPoints);
+    const winners = placeWinners();
+    if (teamRound) {
+      winners.forEach((team) => {
+        team.playerIds.forEach((playerId) => addDelta(nextPoints, playerId, bonusPoints));
+      });
+      nextEntry.jackpotWinners = winners.map((team) => team.teamId);
+      specialResultParts.push(
+        `${type === SPECIAL_ROUND_TYPES.mystery ? "Mystery" : "Jackpot"}: ${winners.map(placedRowName).join(", ")} +${bonusPoints}`
+      );
+    } else {
+      winners.forEach((row) => addDelta(nextPoints, row.playerId, bonusPoints));
+      nextEntry.jackpotWinners = winners.map((row) => row.playerId);
+      specialResultParts.push(
+        `${type === SPECIAL_ROUND_TYPES.mystery ? "Mystery" : "Jackpot"}: ${winners.map(placedRowName).join(", ")} +${bonusPoints}`
+      );
+    }
+    if (type === SPECIAL_ROUND_TYPES.mystery) {
+      nextEntry.mysteryBonus = bonusPoints;
+    }
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.robber) {
+    const stealAmount = safePoint(config.stealAmount);
+    if (teamRound) {
+      const bestPlace = Math.min(...teamPlaces.map((row) => row.place));
+      const worstPlace = Math.max(...teamPlaces.map((row) => row.place));
+      const winners = teamPlaces.filter((row) => row.place === bestPlace);
+      const losers = teamPlaces.filter((row) => row.place === worstPlace);
+      winners.forEach((team) => team.playerIds.forEach((playerId) => addDelta(nextPoints, playerId, stealAmount)));
+      losers.forEach((team) => team.playerIds.forEach((playerId) => addDelta(nextPoints, playerId, -stealAmount)));
+      nextEntry.robberSourceIds = losers.map((row) => row.teamId);
+      nextEntry.robberTargetIds = winners.map((row) => row.teamId);
+      specialResultParts.push(
+        `Räuber: ${winners.map((row) => teamName(teams, row.teamId)).join(", ")} klaut ${stealAmount} von ${losers.map((row) => teamName(teams, row.teamId)).join(", ")}`
+      );
+    } else {
+      const bestPlace = Math.min(...individualPlaces.map((row) => row.place));
+      const worstPlace = Math.max(...individualPlaces.map((row) => row.place));
+      const winners = individualPlaces.filter((row) => row.place === bestPlace);
+      const losers = individualPlaces.filter((row) => row.place === worstPlace);
+      winners.forEach((row) => addDelta(nextPoints, row.playerId, stealAmount));
+      losers.forEach((row) => addDelta(nextPoints, row.playerId, -stealAmount));
+      nextEntry.robberSourceIds = losers.map((row) => row.playerId);
+      nextEntry.robberTargetIds = winners.map((row) => row.playerId);
+      specialResultParts.push(
+        `Räuber: ${winners.map((row) => nameById(tournament.players, row.playerId)).join(", ")} klaut ${stealAmount} von ${losers.map((row) => nameById(tournament.players, row.playerId)).join(", ")}`
+      );
+    }
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.comeback) {
+    const lastBonus = safePoint(config.lastBonus);
+    const secondLastBonus = safePoint(config.secondLastBonus);
+    const bonusesByPlayer = {};
+
+    if (teamRound) {
+      const teamsByTotal = teamTotalsFromPlayers(tournament.players, teams).sort((a, b) => a.total - b.total);
+      const lastTeam = teamsByTotal[0] ?? null;
+      const secondLastTeam = teamsByTotal[1] ?? null;
+      lastTeam?.playerIds.forEach((playerId) => {
+        addDelta(nextPoints, playerId, lastBonus);
+        bonusesByPlayer[playerId] = safePoint(bonusesByPlayer[playerId]) + lastBonus;
+      });
+      secondLastTeam?.playerIds.forEach((playerId) => {
+        addDelta(nextPoints, playerId, secondLastBonus);
+        bonusesByPlayer[playerId] = safePoint(bonusesByPlayer[playerId]) + secondLastBonus;
+      });
+      nextEntry.comebackTargets = {
+        mode: "team",
+        lastTeamId: lastTeam?.id ?? "",
+        secondLastTeamId: secondLastTeam?.id ?? "",
+      };
+      specialResultParts.push(
+        `Comeback: ${lastTeam ? `${lastTeam.name} +${lastBonus}` : ""}${secondLastTeam ? `, ${secondLastTeam.name} +${secondLastBonus}` : ""}`
+      );
+    } else {
+      const playersByTotal = [...tournament.players].sort((a, b) => a.total - b.total);
+      const lastPlayer = playersByTotal[0] ?? null;
+      const secondLastPlayer = playersByTotal[1] ?? null;
+      if (lastPlayer) {
+        addDelta(nextPoints, lastPlayer.id, lastBonus);
+        bonusesByPlayer[lastPlayer.id] = safePoint(bonusesByPlayer[lastPlayer.id]) + lastBonus;
+      }
+      if (secondLastPlayer) {
+        addDelta(nextPoints, secondLastPlayer.id, secondLastBonus);
+        bonusesByPlayer[secondLastPlayer.id] = safePoint(bonusesByPlayer[secondLastPlayer.id]) + secondLastBonus;
+      }
+      nextEntry.comebackTargets = {
+        mode: "player",
+        lastPlayerId: lastPlayer?.id ?? "",
+        secondLastPlayerId: secondLastPlayer?.id ?? "",
+      };
+      specialResultParts.push(
+        `Comeback: ${lastPlayer ? `${lastPlayer.name} +${lastBonus}` : ""}${secondLastPlayer ? `, ${secondLastPlayer.name} +${secondLastBonus}` : ""}`
+      );
+    }
+
+    nextEntry.comebackBonusesByPlayer = bonusesByPlayer;
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.risk) {
+    const rewardPoints = safePoint(config.rewardPoints);
+    const penaltyPoints = safePoint(config.penaltyPoints);
+    const successPlaces = Math.max(1, Math.round(safePoint(config.successPlaces)) || 1);
+    const selected = isPlainObject(riskSelections) ? riskSelections : {};
+    const placesByPlayer = teamRound
+      ? placesByPlayerFromTeamPlaces(teamPlaces)
+      : Object.fromEntries(individualPlaces.map((row) => [row.playerId, row.place]));
+    const normalizedSelections = {};
+    const riskResults = {};
+
+    tournament.players.forEach((player) => {
+      const active = selected[player.id] === true;
+      normalizedSelections[player.id] = active;
+      if (!active) return;
+
+      const place = placesByPlayer[player.id] ?? Number.POSITIVE_INFINITY;
+      const success = place <= successPlaces;
+      const delta = success ? rewardPoints : -penaltyPoints;
+      addDelta(nextPoints, player.id, delta);
+      riskResults[player.id] = { success, delta, place };
+    });
+
+    nextEntry.riskSelections = normalizedSelections;
+    nextEntry.riskResults = riskResults;
+    specialResultParts.push(
+      `Risiko: ${Object.entries(riskResults)
+        .map(([playerId, result]) => `${nameById(tournament.players, playerId)} ${result.delta >= 0 ? "+" : ""}${result.delta}`)
+        .join(", ") || "keine Auswahl"}`
+    );
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.allOrNothing || type === SPECIAL_ROUND_TYPES.kingOfTheRound) {
+    const winnerPoints = safePoint(config.winnerPoints);
+    const lastPenaltyEnabled = type === SPECIAL_ROUND_TYPES.allOrNothing && config.lastPenaltyEnabled === true;
+    const lastPenalty = safePoint(config.lastPenalty);
+    const winners = placeWinners();
+    const losers = placeLosers();
+
+    Object.keys(nextPoints).forEach((playerId) => {
+      nextPoints[playerId] = 0;
+    });
+    winners.forEach((row) => applyToPlacedRow(row, winnerPoints));
+    if (lastPenaltyEnabled) {
+      losers.forEach((row) => applyToPlacedRow(row, -lastPenalty));
+    }
+
+    nextEntry.specialWinnerIds = winners.map(placedRowId);
+    nextEntry.lastPlayerIds = lastPenaltyEnabled ? losers.map(placedRowId) : [];
+    specialResultParts.push(
+      `${type === SPECIAL_ROUND_TYPES.allOrNothing ? "Alles oder Nichts" : "Rundenkönig"}: ${winners.map(placedRowName).join(", ")} +${winnerPoints}${lastPenaltyEnabled ? ` | Letzter -${lastPenalty}` : ""}`
+    );
+  }
+
+  if (type === SPECIAL_ROUND_TYPES.lastManPunishment) {
+    const penaltyPoints = safePoint(config.penaltyPoints);
+    const losers = placeLosers();
+    losers.forEach((row) => applyToPlacedRow(row, -penaltyPoints));
+    nextEntry.lastPlayerIds = losers.map(placedRowId);
+    specialResultParts.push(
+      `Last Man: ${losers.map(placedRowName).join(", ")} -${penaltyPoints}`
+    );
+  }
+
+  nextEntry.specialRoundResult = specialResultParts.filter(Boolean).join(" | ");
+  nextEntry.pointsByPlayer = nextPoints;
+
+  return {
+    entry: nextEntry,
+    pointsByPlayer: nextPoints,
+  };
+}
+
 function start({
   mode,
   games,
@@ -123,6 +459,8 @@ function start({
     }),
     currentPickGameId: null,
     currentBonus: null,
+    currentMinusRound: null,
+    currentSpecialRound: null,
     lastPickedGameId: null,
     log: [],
   };
@@ -134,20 +472,22 @@ function roundContext(tournament, game) {
     tournament.players.length
   );
   const multiplier = roundMultiplier(tournament, game);
-  const currentBonus = normalizeCurrentBonus(
-    tournament.currentBonus,
-    roundScoringSettings,
-    Boolean(tournament.currentPickGameId)
-  );
-  const bonusActive = currentBonus?.active === true;
-  const bonusMultiplier = bonusActive ? currentBonus.multiplier : 1;
+  const currentSpecialRound = currentSpecialRoundFromTournament(tournament, roundScoringSettings);
+  const effectiveRoundType = effectiveSpecialRoundType(currentSpecialRound);
+  const minusRoundActive = effectiveRoundType === SPECIAL_ROUND_TYPES.minus;
+  const bonusActive = effectiveRoundType === SPECIAL_ROUND_TYPES.bonus;
+  const bonusMultiplier = bonusActive ? currentSpecialRound.config.multiplier : 1;
+  const normalizedMultiplier = minusRoundActive ? 1 : multiplier;
 
   return {
     roundScoringSettings,
-    multiplier,
+    multiplier: normalizedMultiplier,
     bonusActive,
     bonusMultiplier,
-    effectiveMultiplier: multiplier * bonusMultiplier,
+    effectiveMultiplier: minusRoundActive ? 1 : normalizedMultiplier * bonusMultiplier,
+    minusRoundActive,
+    minusRoundStep: currentSpecialRound?.config?.pointsStep ?? roundScoringSettings.minusRoundPointsStep,
+    currentSpecialRound,
     globalRoundNumber: tournament.globalRound + 1,
   };
 }
@@ -173,6 +513,8 @@ function completeRound(tournament, game, logEntry, pointsByPlayer) {
       }),
       currentPickGameId: null,
       currentBonus: null,
+      currentMinusRound: null,
+      currentSpecialRound: null,
       log: [logEntry, ...tournament.log],
     },
   };
@@ -197,10 +539,17 @@ function setCurrentPick(tournament, gameId, random = Math.random) {
     return tournament;
   }
 
+  const { currentBonus, currentMinusRound, currentSpecialRound } = createCurrentRoundModifiers(
+    tournament.scoringSettings,
+    random
+  );
+
   return {
     ...tournament,
     currentPickGameId: gameId,
-    currentBonus: createCurrentBonus(tournament.scoringSettings, random),
+    currentBonus,
+    currentMinusRound,
+    currentSpecialRound,
     lastPickedGameId: gameId,
   };
 }
@@ -216,11 +565,12 @@ function validateTeamsForRound(tournament, teams) {
   return { ok: true };
 }
 
-function buildIndividualScoreRound(tournament, baseLogEntry, effectiveMultiplier, scoresInput) {
+function buildIndividualScoreRound(tournament, baseLogEntry, effectiveMultiplier, scoresInput, riskSelections) {
   const source = isPlainObject(scoresInput) ? scoresInput : {};
   const scoresByPlayer = {};
   const pointsByPlayer = {};
   const resultParts = [];
+  const scoreRows = [];
 
   for (const player of tournament.players) {
     const parsed = parseScore(source[player.id]);
@@ -229,12 +579,26 @@ function buildIndividualScoreRound(tournament, baseLogEntry, effectiveMultiplier
     }
 
     scoresByPlayer[player.id] = parsed.score;
-    pointsByPlayer[player.id] = Math.round(parsed.score * effectiveMultiplier);
+    scoreRows.push({ id: player.id, score: parsed.score });
     resultParts.push(`${player.name}: ${parsed.score}`);
   }
 
-  return {
-    ok: true,
+  if (baseLogEntry.minusRoundActive) {
+    rankedPlacesByScore(scoreRows).forEach((row) => {
+      pointsByPlayer[row.id] = minusPointsByPlace(row.place, baseLogEntry.minusRoundStep);
+    });
+  } else {
+    scoreRows.forEach((row) => {
+      pointsByPlayer[row.id] = Math.round(row.score * effectiveMultiplier);
+    });
+  }
+
+  const individualPlaces = rankedPlacesByScore(scoreRows).map((row) => ({
+    playerId: row.id,
+    place: row.place,
+  }));
+  const withSpecial = applySpecialRoundEffects({
+    tournament,
     entry: {
       ...baseLogEntry,
       basePointsByPlace: null,
@@ -243,10 +607,18 @@ function buildIndividualScoreRound(tournament, baseLogEntry, effectiveMultiplier
       result: resultParts.join(" | "),
     },
     pointsByPlayer,
+    individualPlaces,
+    riskSelections,
+  });
+
+  return {
+    ok: true,
+    entry: withSpecial.entry,
+    pointsByPlayer: withSpecial.pointsByPlayer,
   };
 }
 
-function buildPlacementRound(tournament, baseLogEntry, roundScoringSettings, effectiveMultiplier, placements) {
+function buildPlacementRound(tournament, baseLogEntry, roundScoringSettings, effectiveMultiplier, placements, riskSelections) {
   if (placements.length !== tournament.players.length || placements.some((value) => !value)) {
     return { ok: false, message: "Alle Plätze wählen" };
   }
@@ -268,15 +640,17 @@ function buildPlacementRound(tournament, baseLogEntry, roundScoringSettings, eff
 
   placements.forEach((playerId, index) => {
     const place = index + 1;
-    const points = Math.round(basePointsByPlace[String(place)] * effectiveMultiplier);
+    const points = baseLogEntry.minusRoundActive
+      ? minusPointsByPlace(place, baseLogEntry.minusRoundStep)
+      : Math.round(basePointsByPlace[String(place)] * effectiveMultiplier);
     const player = tournament.players.find((item) => item.id === playerId);
 
     pointsByPlayer[playerId] = points;
     resultParts.push(`${place}. ${player ? player.name : "?"}`);
   });
 
-  return {
-    ok: true,
+  const withSpecial = applySpecialRoundEffects({
+    tournament,
     entry: {
       ...baseLogEntry,
       basePointsByPlace,
@@ -285,6 +659,14 @@ function buildPlacementRound(tournament, baseLogEntry, roundScoringSettings, eff
       pointsByPlayer,
     },
     pointsByPlayer,
+    individualPlaces: individualPlacesFromPlacements(placements),
+    riskSelections,
+  });
+
+  return {
+    ok: true,
+    entry: withSpecial.entry,
+    pointsByPlayer: withSpecial.pointsByPlayer,
   };
 }
 
@@ -294,7 +676,8 @@ function buildTeamWinnerRound(
   baseLogEntry,
   roundScoringSettings,
   effectiveMultiplier,
-  winnerTeamId
+  winnerTeamId,
+  riskSelections
 ) {
   const winnerTeam = teams.find((team) => team.id === winnerTeamId);
   if (!winnerTeam || winnerTeam.playerIds.length === 0) {
@@ -307,31 +690,58 @@ function buildTeamWinnerRound(
   );
   const winnerPoints = Math.round(safePoint(basePointsByPlace["1"]) * effectiveMultiplier);
   const winnerIds = new Set(winnerTeam.playerIds);
+  const minusActive = baseLogEntry.minusRoundActive === true;
   const pointsByPlayer = {};
 
   tournament.players.forEach((player) => {
-    pointsByPlayer[player.id] = winnerIds.has(player.id) ? winnerPoints : 0;
+    pointsByPlayer[player.id] = winnerIds.has(player.id)
+      ? 0
+      : minusActive
+        ? minusPointsByPlace(2, baseLogEntry.minusRoundStep)
+        : 0;
+    if (!minusActive && winnerIds.has(player.id)) {
+      pointsByPlayer[player.id] = winnerPoints;
+    }
+  });
+
+  const teamPlaces = teams.map((team) => ({
+    teamId: team.id,
+    place: team.id === winnerTeamId ? 1 : 2,
+    playerIds: team.playerIds,
+  }));
+  const entry = {
+    ...baseLogEntry,
+    basePointsByPlace,
+    winnerTeamId,
+    teamPointsByTeam: teamPointsFromPlayerPoints(pointsByPlayer, teams),
+    pointsByPlayer,
+    result: `${teamName(teams, winnerTeamId)} gewinnt`,
+  };
+  const withSpecial = applySpecialRoundEffects({
+    tournament,
+    entry,
+    pointsByPlayer,
+    teamPlaces,
+    teams,
+    riskSelections,
   });
 
   return {
     ok: true,
     entry: {
-      ...baseLogEntry,
-      basePointsByPlace,
-      winnerTeamId,
-      teamPointsByTeam: teamPointsFromPlayerPoints(pointsByPlayer, teams),
-      pointsByPlayer,
-      result: `${teamName(teams, winnerTeamId)} gewinnt`,
+      ...withSpecial.entry,
+      teamPointsByTeam: teamPointsFromPlayerPoints(withSpecial.pointsByPlayer, teams),
     },
-    pointsByPlayer,
+    pointsByPlayer: withSpecial.pointsByPlayer,
   };
 }
 
-function buildTeamScoreRound(tournament, teams, baseLogEntry, effectiveMultiplier, teamScoresInput) {
+function buildTeamScoreRound(tournament, teams, baseLogEntry, effectiveMultiplier, teamScoresInput, riskSelections) {
   const source = isPlainObject(teamScoresInput) ? teamScoresInput : {};
   const teamScoresByTeam = {};
   const pointsByPlayer = {};
   const resultParts = [];
+  const scoreRows = [];
 
   tournament.players.forEach((player) => {
     pointsByPlayer[player.id] = 0;
@@ -343,27 +753,60 @@ function buildTeamScoreRound(tournament, teams, baseLogEntry, effectiveMultiplie
       return { ok: false, message: "Team-Scores muessen 0 oder groesser sein" };
     }
 
-    const points = Math.round(parsed.score * effectiveMultiplier);
     teamScoresByTeam[team.id] = parsed.score;
+    scoreRows.push({ id: team.id, score: parsed.score });
+    resultParts.push(`${team.name}: ${parsed.score}`);
+  }
+
+  const pointsByTeam = {};
+  if (baseLogEntry.minusRoundActive) {
+    rankedPlacesByScore(scoreRows).forEach((row) => {
+      pointsByTeam[row.id] = minusPointsByPlace(row.place, baseLogEntry.minusRoundStep);
+    });
+  } else {
+    scoreRows.forEach((row) => {
+      pointsByTeam[row.id] = Math.round(row.score * effectiveMultiplier);
+    });
+  }
+
+  teams.forEach((team) => {
+    const points = pointsByTeam[team.id] ?? 0;
     team.playerIds.forEach((playerId) => {
       if (Object.hasOwn(pointsByPlayer, playerId)) {
         pointsByPlayer[playerId] = points;
       }
     });
-    resultParts.push(`${team.name}: ${parsed.score}`);
-  }
+  });
+
+  const teamPlaces = rankedPlacesByScore(scoreRows).map((row) => ({
+    teamId: row.id,
+    place: row.place,
+    playerIds: teams.find((team) => team.id === row.id)?.playerIds ?? [],
+  }));
+  const entry = {
+    ...baseLogEntry,
+    basePointsByPlace: null,
+    teamScoresByTeam,
+    teamPointsByTeam: teamPointsFromPlayerPoints(pointsByPlayer, teams),
+    pointsByPlayer,
+    result: resultParts.join(" | "),
+  };
+  const withSpecial = applySpecialRoundEffects({
+    tournament,
+    entry,
+    pointsByPlayer,
+    teamPlaces,
+    teams,
+    riskSelections,
+  });
 
   return {
     ok: true,
     entry: {
-      ...baseLogEntry,
-      basePointsByPlace: null,
-      teamScoresByTeam,
-      teamPointsByTeam: teamPointsFromPlayerPoints(pointsByPlayer, teams),
-      pointsByPlayer,
-      result: resultParts.join(" | "),
+      ...withSpecial.entry,
+      teamPointsByTeam: teamPointsFromPlayerPoints(withSpecial.pointsByPlayer, teams),
     },
-    pointsByPlayer,
+    pointsByPlayer: withSpecial.pointsByPlayer,
   };
 }
 
@@ -386,8 +829,12 @@ function saveRoundLegacy(tournament, roundInput) {
     bonusActive,
     bonusMultiplier,
     effectiveMultiplier,
+    minusRoundActive,
+    minusRoundStep,
+    currentSpecialRound,
     globalRoundNumber,
   } = roundContext(tournament, game);
+  const effectiveRoundType = effectiveSpecialRoundType(currentSpecialRound);
   const baseLogEntry = {
     id: uid(),
     t: Date.now(),
@@ -401,6 +848,18 @@ function saveRoundLegacy(tournament, roundInput) {
     bonusActive,
     bonusMultiplier,
     effectiveMultiplier,
+    minusRoundActive,
+    minusRoundStep,
+    specialRoundType: currentSpecialRound?.type ?? null,
+    specialRoundLabel: currentSpecialRound?.label ?? "",
+    specialRoundConfig: currentSpecialRound?.config ?? null,
+    resolvedSpecialRoundType: currentSpecialRound?.resolvedType ?? effectiveRoundType,
+    specialRoundHidden: currentSpecialRound?.hidden === true,
+    currentSpecialRound,
+    jackpotRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.jackpot,
+    robberRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.robber,
+    comebackRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.comeback,
+    riskRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.risk,
     scoringSettings: roundScoringSettings,
   };
 
@@ -413,6 +872,7 @@ function saveRoundLegacy(tournament, roundInput) {
     const scoresByPlayer = {};
     const pointsByPlayer = {};
     const resultParts = [];
+    const scoreRows = [];
 
     for (const player of tournament.players) {
       const parsed = parseScore(scoresInput[player.id]);
@@ -421,8 +881,18 @@ function saveRoundLegacy(tournament, roundInput) {
       }
 
       scoresByPlayer[player.id] = parsed.score;
-      pointsByPlayer[player.id] = Math.round(parsed.score * effectiveMultiplier);
+      scoreRows.push({ id: player.id, score: parsed.score });
       resultParts.push(`${player.name}: ${parsed.score}`);
+    }
+
+    if (minusRoundActive) {
+      rankedPlacesByScore(scoreRows).forEach((row) => {
+        pointsByPlayer[row.id] = minusPointsByPlace(row.place, minusRoundStep);
+      });
+    } else {
+      scoreRows.forEach((row) => {
+        pointsByPlayer[row.id] = Math.round(row.score * effectiveMultiplier);
+      });
     }
 
     return completeRound(
@@ -456,7 +926,9 @@ function saveRoundLegacy(tournament, roundInput) {
 
   placements.forEach((playerId, index) => {
     const place = index + 1;
-    const points = Math.round(basePointsByPlace[String(place)] * effectiveMultiplier);
+    const points = minusRoundActive
+      ? minusPointsByPlace(place, minusRoundStep)
+      : Math.round(basePointsByPlace[String(place)] * effectiveMultiplier);
     const player = tournament.players.find((item) => item.id === playerId);
 
     pointsByPlayer[playerId] = points;
@@ -499,8 +971,12 @@ function saveRound(tournament, roundInput) {
     bonusActive,
     bonusMultiplier,
     effectiveMultiplier,
+    minusRoundActive,
+    minusRoundStep,
+    currentSpecialRound,
     globalRoundNumber,
   } = roundContext(tournament, game);
+  const effectiveRoundType = effectiveSpecialRoundType(currentSpecialRound);
   const baseLogEntry = {
     id: uid(),
     t: Date.now(),
@@ -516,6 +992,18 @@ function saveRound(tournament, roundInput) {
     bonusActive,
     bonusMultiplier,
     effectiveMultiplier,
+    minusRoundActive,
+    minusRoundStep,
+    specialRoundType: currentSpecialRound?.type ?? null,
+    specialRoundLabel: currentSpecialRound?.label ?? "",
+    specialRoundConfig: currentSpecialRound?.config ?? null,
+    resolvedSpecialRoundType: currentSpecialRound?.resolvedType ?? effectiveRoundType,
+    specialRoundHidden: currentSpecialRound?.hidden === true,
+    currentSpecialRound,
+    jackpotRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.jackpot,
+    robberRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.robber,
+    comebackRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.comeback,
+    riskRoundActive: effectiveRoundType === SPECIAL_ROUND_TYPES.risk,
     scoringSettings: roundScoringSettings,
     teamsSnapshot: tournament.teamModeEnabled === true ? teams : [],
   };
@@ -526,7 +1014,8 @@ function saveRound(tournament, roundInput) {
       tournament,
       baseLogEntry,
       effectiveMultiplier,
-      roundInput?.scoresByPlayer
+      roundInput?.scoresByPlayer,
+      roundInput?.riskSelections
     );
   } else if (roundEvaluationMode === ROUND_EVALUATION_MODES.individualPlacement) {
     const placements = Array.isArray(roundInput) ? roundInput : roundInput?.placements ?? [];
@@ -535,7 +1024,8 @@ function saveRound(tournament, roundInput) {
       baseLogEntry,
       roundScoringSettings,
       effectiveMultiplier,
-      placements
+      placements,
+      roundInput?.riskSelections
     );
   } else {
     const teamValidation = validateTeamsForRound(tournament, teams);
@@ -548,7 +1038,8 @@ function saveRound(tournament, roundInput) {
         baseLogEntry,
         roundScoringSettings,
         effectiveMultiplier,
-        roundInput?.winnerTeamId
+        roundInput?.winnerTeamId,
+        roundInput?.riskSelections
       );
     } else if (roundEvaluationMode === ROUND_EVALUATION_MODES.teamScore) {
       result = buildTeamScoreRound(
@@ -556,7 +1047,8 @@ function saveRound(tournament, roundInput) {
         teams,
         baseLogEntry,
         effectiveMultiplier,
-        roundInput?.teamScoresByTeam
+        roundInput?.teamScoresByTeam,
+        roundInput?.riskSelections
       );
     } else {
       const placements = Array.isArray(roundInput) ? roundInput : roundInput?.placements ?? [];
@@ -565,7 +1057,8 @@ function saveRound(tournament, roundInput) {
         baseLogEntry,
         roundScoringSettings,
         effectiveMultiplier,
-        placements
+        placements,
+        roundInput?.riskSelections
       );
       if (result.ok) {
         result.entry = {
@@ -588,6 +1081,8 @@ function skipGame(tournament) {
     ...tournament,
     currentPickGameId: null,
     currentBonus: null,
+    currentMinusRound: null,
+    currentSpecialRound: null,
     games: tournament.games.map((game) =>
       game.id === gameId
         ? { ...game, remainingRounds: 0, totalRounds: game.playedRounds }
@@ -624,6 +1119,8 @@ function deleteLogEntry(tournament, entryId) {
       globalRound: remainingLog.length,
       currentPickGameId: null,
       currentBonus: null,
+      currentMinusRound: null,
+      currentSpecialRound: null,
       lastPickedGameId: previousPickedGameId(remainingLog, tournament.games),
       players: subtractPointsFromPlayers(tournament.players, pointsByPlayer),
       games: tournament.games.map((game) => {
@@ -651,6 +1148,9 @@ function buildEditedScoreEntry(tournament, entry, input) {
   const scoresByPlayer = {};
   const pointsByPlayer = {};
   const resultParts = [];
+  const scoreRows = [];
+  const minusActive = entry.minusRoundActive === true;
+  const minusStep = safePoint(entry.minusRoundStep) || roundScoringSettings.minusRoundPointsStep;
 
   for (const player of tournament.players) {
     const parsed = parseScore(scoresInput[player.id]);
@@ -659,8 +1159,18 @@ function buildEditedScoreEntry(tournament, entry, input) {
     }
 
     scoresByPlayer[player.id] = parsed.score;
-    pointsByPlayer[player.id] = Math.round(parsed.score * effectiveMultiplier);
+    scoreRows.push({ id: player.id, score: parsed.score });
     resultParts.push(`${player.name}: ${parsed.score}`);
+  }
+
+  if (minusActive) {
+    rankedPlacesByScore(scoreRows).forEach((row) => {
+      pointsByPlayer[row.id] = minusPointsByPlace(row.place, minusStep);
+    });
+  } else {
+    scoreRows.forEach((row) => {
+      pointsByPlayer[row.id] = Math.round(row.score * effectiveMultiplier);
+    });
   }
 
   return {
@@ -672,6 +1182,8 @@ function buildEditedScoreEntry(tournament, entry, input) {
       roundEvaluationMode: ROUND_EVALUATION_MODES.individualScore,
       multiplierMode: entry.multiplierMode ?? roundScoringSettings.multiplierMode,
       scoringSettings: roundScoringSettings,
+      minusRoundActive: minusActive,
+      minusRoundStep: minusStep,
       basePointsByPlace: null,
       scoresByPlayer,
       pointsByPlayer,
@@ -698,12 +1210,16 @@ function buildEditedPlacementEntry(tournament, entry, input) {
   const effectiveMultiplier = normalizeEffectiveMultiplier(entry);
   const roundScoringSettings = logScoringSettings(tournament, entry);
   const basePointsByPlace = logBasePointsByPlace(tournament, entry);
+  const minusActive = entry.minusRoundActive === true;
+  const minusStep = safePoint(entry.minusRoundStep) || roundScoringSettings.minusRoundPointsStep;
   const pointsByPlayer = {};
   const resultParts = [];
 
   placements.forEach((playerId, index) => {
     const place = index + 1;
-    const points = Math.round(safePoint(basePointsByPlace[String(place)]) * effectiveMultiplier);
+    const points = minusActive
+      ? minusPointsByPlace(place, minusStep)
+      : Math.round(safePoint(basePointsByPlace[String(place)]) * effectiveMultiplier);
     const player = tournament.players.find((item) => item.id === playerId);
 
     pointsByPlayer[playerId] = points;
@@ -719,6 +1235,8 @@ function buildEditedPlacementEntry(tournament, entry, input) {
       roundEvaluationMode: ROUND_EVALUATION_MODES.individualPlacement,
       multiplierMode: entry.multiplierMode ?? roundScoringSettings.multiplierMode,
       scoringSettings: roundScoringSettings,
+      minusRoundActive: minusActive,
+      minusRoundStep: minusStep,
       basePointsByPlace,
       placements,
       pointsByPlayer,
@@ -745,6 +1263,21 @@ function editLogEntry(tournament, entryId, input) {
   );
   if (isTeamRoundEvaluationMode(roundEvaluationMode)) {
     return { ok: false, message: "Team-Runden koennen aktuell geloescht, aber nicht bearbeitet werden" };
+  }
+  if (
+    [
+      SPECIAL_ROUND_TYPES.jackpot,
+      SPECIAL_ROUND_TYPES.robber,
+      SPECIAL_ROUND_TYPES.comeback,
+      SPECIAL_ROUND_TYPES.risk,
+      SPECIAL_ROUND_TYPES.secret,
+      SPECIAL_ROUND_TYPES.mystery,
+      SPECIAL_ROUND_TYPES.allOrNothing,
+      SPECIAL_ROUND_TYPES.kingOfTheRound,
+      SPECIAL_ROUND_TYPES.lastManPunishment,
+    ].includes(entryToEdit.specialRoundType)
+  ) {
+    return { ok: false, message: "Diese Sonderrunde kann aktuell geloescht, aber nicht bearbeitet werden" };
   }
 
   const scoringMode = normalizeGameScoringMode(entryToEdit.scoringMode);
@@ -790,6 +1323,8 @@ function undo(tournament) {
       globalRound: Math.max(0, tournament.globalRound - 1),
       currentPickGameId: null,
       currentBonus: null,
+      currentMinusRound: null,
+      currentSpecialRound: null,
       lastPickedGameId: resolveLogGameId(remainingLog[0], tournament.games) || null,
       players: tournament.players.map((player) => {
         const points = Number(entryToUndo.pointsByPlayer[player.id] ?? 0);

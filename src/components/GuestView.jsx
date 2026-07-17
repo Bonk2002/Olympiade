@@ -12,6 +12,8 @@ import {
   gameScoringModeLabel,
   normalizeScoringSettings,
   roundMultiplier,
+  SPECIAL_ROUND_TYPES,
+  specialRoundText,
 } from "../utils/scoring";
 import {
   normalizeRoundEvaluationMode,
@@ -156,9 +158,18 @@ function GuestCurrentGame({ tournament, currentGame, roundEvaluationMode }) {
     tournament.players.length,
     tournament.mode
   );
-  const currentBonus = tournament.currentBonus?.active ? tournament.currentBonus : null;
+  const currentSpecialRound = tournament.currentSpecialRound ?? null;
+  const currentMinusRound = currentSpecialRound?.type === SPECIAL_ROUND_TYPES.minus
+    ? { active: true, pointsStep: currentSpecialRound.config?.pointsStep ?? 0 }
+    : tournament.currentMinusRound?.active ? tournament.currentMinusRound : null;
+  const currentBonus = currentSpecialRound?.type === SPECIAL_ROUND_TYPES.bonus
+    ? { active: true, multiplier: currentSpecialRound.config?.multiplier ?? 1 }
+    : !currentMinusRound && tournament.currentBonus?.active ? tournament.currentBonus : null;
+  const otherSpecialRound = currentSpecialRound && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(currentSpecialRound.type)
+    ? currentSpecialRound
+    : null;
   const normalMultiplier = currentGame ? roundMultiplier(tournament, currentGame) : 1;
-  const effectiveMultiplier = normalMultiplier * (currentBonus?.multiplier ?? 1);
+  const effectiveMultiplier = currentMinusRound ? 1 : normalMultiplier * (currentBonus?.multiplier ?? 1);
   const openGamesCount = TournamentEngine.openGames(tournament).length;
 
   if (!currentGame) {
@@ -182,7 +193,7 @@ function GuestCurrentGame({ tournament, currentGame, roundEvaluationMode }) {
   );
 
   return (
-    <section className={`guestCard guestCurrent ${currentBonus ? "bonusActive" : ""}`}>
+    <section className={`guestCard guestCurrent ${currentBonus ? "bonusActive" : ""} ${currentMinusRound ? "minusActive" : ""} ${otherSpecialRound ? `specialActive special-${otherSpecialRound.type}` : ""}`}>
       <div className="guestCurrentTop">
         <div>
           <span className="guestEyebrow">Aktuelles Spiel</span>
@@ -191,6 +202,14 @@ function GuestCurrentGame({ tournament, currentGame, roundEvaluationMode }) {
         {currentBonus && (
           <strong className="guestBonus">BONUS x{formatMultiplier(currentBonus.multiplier)}</strong>
         )}
+        {currentMinusRound && (
+          <strong className="guestMinus">MINUSRUNDE · -{formatMultiplier(currentMinusRound.pointsStep)}</strong>
+        )}
+        {otherSpecialRound && (
+          <strong className={`guestSpecial guestSpecial-${otherSpecialRound.type}`}>
+            {specialRoundText(otherSpecialRound)}
+          </strong>
+        )}
       </div>
 
       <div className="guestChips">
@@ -198,8 +217,16 @@ function GuestCurrentGame({ tournament, currentGame, roundEvaluationMode }) {
         <span>TR {tournament.globalRound + 1}</span>
         <span>{roundEvaluationModeLabel(normalizedRoundMode)}</span>
         <span>{gameScoringModeLabel(currentGame.scoringMode)}</span>
-        <span>Normal x{formatMultiplier(normalMultiplier)}</span>
-        <span>Gesamt x{formatMultiplier(effectiveMultiplier)}</span>
+        {currentMinusRound ? (
+          <span>-{formatMultiplier(currentMinusRound.pointsStep)} pro Platz</span>
+        ) : otherSpecialRound ? (
+          <span>{specialRoundText(otherSpecialRound)}</span>
+        ) : (
+          <>
+            <span>Normal x{formatMultiplier(normalMultiplier)}</span>
+            <span>Gesamt x{formatMultiplier(effectiveMultiplier)}</span>
+          </>
+        )}
       </div>
     </section>
   );
@@ -210,6 +237,10 @@ function GuestStatus({ tournament }) {
   const remainingRounds = tournament.games.reduce((sum, game) => sum + (game.remainingRounds ?? 0), 0);
   const openGames = TournamentEngine.openGames(tournament).length;
   const bonusRounds = tournament.log.filter((entry) => entry.bonusActive).length;
+  const minusRounds = tournament.log.filter((entry) => entry.minusRoundActive).length;
+  const specialRounds = tournament.log.filter((entry) =>
+    entry.specialRoundType && ![SPECIAL_ROUND_TYPES.bonus, SPECIAL_ROUND_TYPES.minus].includes(entry.specialRoundType)
+  ).length;
 
   return (
     <div className="guestStatus">
@@ -218,6 +249,8 @@ function GuestStatus({ tournament }) {
       <span>{remainingRounds} offen</span>
       <span>{openGames} Games</span>
       {bonusRounds > 0 && <span>{bonusRounds} Bonus</span>}
+      {minusRounds > 0 && <span>{minusRounds} Minus</span>}
+      {specialRounds > 0 && <span>{specialRounds} Sonderrunden</span>}
     </div>
   );
 }

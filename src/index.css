@@ -3,13 +3,18 @@
 @tailwind utilities;
 
 html, body, #root {
-  height: 100%;
+  min-height: 100%;
   width: 100%;
   margin: 0;
 }
 
+html {
+  background: #050008;
+}
+
 body {
-  background: #000;
+  min-height: 100vh;
+  background: #050008;
   overflow-x: hidden;
 }
 
